@@ -1,0 +1,4 @@
+django-restframework
+django >= 1.5
+python-hawk
+django-jsonfield >= 0.9.17
