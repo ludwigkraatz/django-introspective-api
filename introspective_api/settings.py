@@ -28,6 +28,9 @@ USER_SETTINGS = getattr(settings, 'INTROSPECTIVE_API', None)
 
 DEFAULTS = {
     'RELATED_VIEWS_IN_HEADER': True,
+    
+    'STATIC_ENDPOINT_CONFIG': 'introspective_api.endpoints.get_statics_config',
+        
     'LOG_CLIENT': False,
     
     'PAGINATION_IN_HEADER': True,
@@ -72,6 +75,7 @@ IMPORT_STRINGS = ('DEFAULT_MODEL_SERIALIZER_CLASS',
                   'API_RESPONSE_CLASS',
                   'AUTO_UUID_FIELD',
                   'API_CREDENTIALS_VIEW',
+                  'STATIC_ENDPOINT_CONFIG',
 )
 
 

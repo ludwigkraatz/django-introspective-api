@@ -489,6 +489,25 @@ class APIRoot(ApiEndpointMixin, APIView):
         
         self.type               = self.type or self.ROOT_ENDPOINT
         
+        self.statics_config     = {
+            'js':{
+                'paths':[
+                    {'name':"json", 'location': "../lib/json2"},
+                    {'name':"jquery", 'location': "../lib/jquery"},
+                    {'name':"introspective-api-endpoint", 'location': "../lib/introspective_api.endpoint"},
+                    {'name':"introspective-api-client", 'location': "../lib/introspective_api.client"},
+                    {'name':"introspective-api-object", 'location': "../lib/introspective_api.object"},
+                ],
+                'packages':[
+                    {
+                        'name': 'hawk',
+                        'main': 'hawk',
+                        'location': '../lib',
+                    }
+                ]
+            }
+        }
+        
     def post(self, request, *args, **kwargs):
         action = request.DATA.get('action', None)
         
@@ -580,9 +599,50 @@ class APIRoot(ApiEndpointMixin, APIView):
         
         return sitemap
     
+    def get_static_endpoints(self, ):
+        """
+        @returns a generator of all static endpoint configurations. if None was registered, it returns a default endpoint
+        """
+        return [
+                    {
+                        'url': self.root_url,
+                        'js': {
+                            'var_name': 'api',
+                            'file_name': 'api.js',
+                            'requirements': {
+                                'jquery': None,
+                                'endpoint': None,
+                                },
+                            'is_cross_domain': False
+                        }
+                    }
+                ]
+    
+    def register_js_resource(self, name_or_package, value=None):
+        """
+        @brief here the static_config can be manipulated
+        """
+        if value is None:
+            # name contains a package
+            self.statics_config['js']['packages'].append(name_or_package)
+        else:
+            self.statics_config['js']['paths'][name_or_package] = value
+    
+    def get_statics_config(self, ):
+        """
+        @returns the config for static files generation
+        """
+        return {
+                    'js':         self.statics_config['js'],
+                    'endpoints':  self.get_static_endpoints()
+                }   
+    
+    
     
     
 api_root = APIRoot()
+get_statics_config = api_root.get_statics_config
+
 ###
 
             
