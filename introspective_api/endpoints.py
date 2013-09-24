@@ -466,9 +466,13 @@ class APIRoot(ApiEndpointMixin, APIView):
                     yield endpoint
         
     def prepare_as_url(self):
-        endpoint_url = '^%s' % self.root_url
+        if self.root_url:
+            endpoint_url = '^%s' % self.root_url
+        else:
+            endpoint_url = ''
+            
         return endpoint_url, url(
-            '%s$' % endpoint_url,
+            '^%s$' % self.root_url,
             self.__class__.as_view(),
             name=api_settings.API_ROOT_NAME
         )
