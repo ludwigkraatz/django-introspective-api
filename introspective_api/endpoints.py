@@ -24,6 +24,9 @@ class ApiEndpointMixin(object):
         self.namespace  = config.pop('namespace', None)
     
     def get_complete_namespace(self, post_fix=False):
+        """
+        @brief concats the namespaces from this and all parent endpoints
+        """
         namespace = self.namespace
         paren_namespace = self.parent.get_complete_namespace() if self.parent else None
         
@@ -39,18 +42,30 @@ class ApiEndpointMixin(object):
     
     
     def get_absolute_name(self, ):
-        if self.namespace:
+        """
+        @brief the absolute name of this *view*. This includes all namespaces this view is within.
+        """
+        if self.namespace:# TODO: self.namespace replace with get_complete_namespace()
             return '%s.%s' % self.namespace, self.name
         
         return self.name
     
     def activate(self, name):
+        """
+        @brief an endpoint can be activated explicitly, if not done when it was registered
+        """
         self._endpoint_registry[name] = True
     
     def deactivate(self, name):
+        """
+        @brief an endpoint can be deactivated explicitly, if not done when it was registered
+        """
         self._endpoint_registry[name] = False
     
-    def register_endpoint(self, name, **config):        
+    def register_endpoint(self, name, **config):
+        """
+        @brief this method registers a standard endpoint as "child" of the current one
+        """
         #if not ("view" in config):            
         #    # e.g. @register_endpoint.***('somename') or @register_endpoint.***(name='somename',..)
         #    def dec(view):
@@ -62,11 +77,17 @@ class ApiEndpointMixin(object):
         return self._register_endpoint(name, **config)
     
     def register_filter(self, name, pattern, **config):
+        """
+        @brief a filter is an endpoint that is applied on the current "collection kind" endpoint.
+        """
         config['type']      = self.FILTER_ENDPOINT
         config['pattern']   = pattern
         return self.register_endpoint(name, **config)
     
     def register_redirect(self, name, target_endpoint, redirect_lookup=None, **config):
+        """
+        @brief a redirect endpoint is simply used for redirection.
+        """
         config['type']              = self.REDIRECT_ENDPOINT
         config['target_endpoint']   = target_endpoint
         config['redirect_lookup']   = redirect_lookup or {}
@@ -82,6 +103,9 @@ class ApiEndpointMixin(object):
         
     @property
     def url_patterns(self):
+        """
+        @brief url_patterns is a property that returns the url_patterns for this and all "child" endpoints.
+        """
         urlpatterns=[]
         
         # prepare endpoint as URL
@@ -137,10 +161,16 @@ class ApiEndpointMixin(object):
             
         return patterns('', *urlpatterns) if urlpatterns else None
 
-    def list_endpoints(self):        
+    def list_endpoints(self):
+        """
+        @brief this method is a generator, representing the list of endpoints that are registered as child of the current one.
+        """
         raise Exception, 'to implement by subclass'
     
     def register(self, endpoint, **config):
+        """
+        @brief this method is a generator, representing the list of endpoints that are registered as child of the current one.
+        """
         name = endpoint.name
         
         if endpoint.root:
@@ -164,6 +194,10 @@ class ApiEndpointMixin(object):
         return self    
 
     def _register_endpoint(self, name, **config):
+        """
+        @brief the actual registering of an endpoint is done here.
+        TODO: register_endpoint might be obsolete
+        """
         if self.type == self.REDIRECT_ENDPOINT:
             raise ImproperlyConfigured, 'redirect Endpoint "%s" can not register endpoints' % self.name   
         
@@ -186,10 +220,16 @@ class ApiEndpointMixin(object):
         
         return endpoint
 
-    def prepare_as_url(self):        
+    def prepare_as_url(self):
+        """
+        @returns tuple of ('endpoint_url', djangos url() definition).
+        """
         raise Exception, 'to implement by subclass'
     
     def resolve_redirect(self, ):
+        """
+        TODO: is this being used? not really.
+        """
         pass
     
 
@@ -220,9 +260,16 @@ class ApiEndpoint(ApiEndpointMixin):
         super(ApiEndpoint, self).__init__(**config)
     
     def has_url(self, ):
+        """
+        @brief having an url, is the first condition for being represented in the url_patterns
+        """
         return bool(self.view or self.view_class)
             
     def initialize(self, root, parent):
+        """
+        @brief an endpoint needs to get initialized for its specific parent and root.
+        This allows to define an endpoint once and use it multiple times at several locations.
+        """
         self.root       = root
         self.parent     = parent
         
@@ -254,7 +301,11 @@ class ApiEndpoint(ApiEndpointMixin):
                 
                 self.view           = self.view_class.as_view(**kwargs) 
             
-    def get_object_filter(self, request, *args, **kwargs):   
+    def get_object_filter(self, request, *args, **kwargs):
+        """
+        @brief the object filter is being applied on a "collection" in order to receive a requested object.
+        @returns a lookup dict, that is passed (**dict) as kwargs for djangos filter() method.
+        """
         filter_kwargs = {}
         
         for endpoint, lookup_field in self.lookup_fields.items():
@@ -269,7 +320,10 @@ class ApiEndpoint(ApiEndpointMixin):
         
         return filter_kwargs
     
-    def has_endpoints(self, ):    
+    def has_endpoints(self, ):
+        """
+        @returns if there are any active, registered endpoints
+        """
         for name, is_active in self._endpoint_registry.iteritems():
             if is_active and name in self._endpoints:
                 for endpoint in self._endpoints[name]:
@@ -284,6 +338,9 @@ class ApiEndpoint(ApiEndpointMixin):
             
     
     def as_url(self, absolute=False):
+        """
+        @returns the url, this endpoint is accessible with
+        """
         if self.type == self.FILTER_ENDPOINT:
             url = '(?P<%s>%s)' % (self.get_name(), self.pattern)
         elif self.type is None:
@@ -316,12 +373,24 @@ class ApiEndpoint(ApiEndpointMixin):
             )
     
     def get_fitlers_field_name(self, ):
+        """
+        @brief the filters field name is the field part of this endpoints name.
+        if the endpoints name is not in the *model__field* syntax, it just returns the name
+        """
         return self.name.split('__')[-1] if '__' in self.name else self.name
     
     def get_fitlers_object_name(self, ):
+        """
+        @brief the filters object name is the model part of this endpoints name.
+        if the endpoints name is not in the *model__field* syntax, it just returns the name
+        """
         return self.name.split('__')[0] if '__' in self.name else self.name
     
     def get_name(self, for_sitemap=False):
+        """
+        @returns the name for this endpoints, depending on its purpose
+        @brief if the name should be used for the sitemap, it needs special formatting.
+        """
         # TODO: should be used instead of .name
         # should be aware of type and react accordingly
         if not for_sitemap:
@@ -330,6 +399,10 @@ class ApiEndpoint(ApiEndpointMixin):
     
         
     def as_sitemap_url(self, absolute=False, python_formatting=False):
+        """
+        @returns the sitemap url string
+        @brief the sitemap urls might contain {vars} when in the sitemap.json or (vars)%s for django urls (python formatting)
+        """
         if self.type == self.FILTER_ENDPOINT:
                 
             if not python_formatting:
@@ -353,6 +426,9 @@ class ApiEndpoint(ApiEndpointMixin):
             return url      
         
     def as_sitemap(self, url_path=''):
+        """
+        @returns this endpoint and all children as sitemap
+        """
         current_url = None
         if self.has_url():
             current_url = self.as_sitemap_url(absolute=True) + '/'
@@ -374,7 +450,9 @@ class ApiEndpoint(ApiEndpointMixin):
         return sitemap or None
     
     def is_active(self, endpoint=None):
-        
+        """
+        @brief if an endpoint is not active, it is not propagated at all.
+        """
         if endpoint:
             # if the child was explicitly deactivated
             if not self._endpoint_registry.get(endpoint.name, False):
@@ -393,6 +471,10 @@ class ApiEndpoint(ApiEndpointMixin):
     
     
 class APIRoot(ApiEndpointMixin, APIView):
+    """
+    @brief the APIRoot is a special endpoint, as it provides some built-in actions like "getCredentials" or "getSitemap".
+    It also keeps track on all view_names that are being registered.
+    """
     def __init__(self, **config):        
         self._view_names        = {}
         
@@ -431,6 +513,9 @@ class APIRoot(ApiEndpointMixin, APIView):
         return True
     
     def register_view_name(self, view_name=None, namespace=None):
+        """
+        @brief reigsters a view_name and ensures there is no existing view in this namespace registered with this name
+        """
         if not view_name:
             return
         
