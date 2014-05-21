@@ -29,14 +29,16 @@ def update_statics(log=None):
     """
     config = get_config()
     
-    target_dir = settings.STATIC_ROOT + ('endpoints/')
+    target_dir = api_settings.STATIC_ENDPOINT_FOLDER
+    if log:
+        log.write(target_dir)
     if not os.path.exists(target_dir):
         os.makedirs(target_dir)
     
     for endpoint in config.get('endpoints', []):
         with open(target_dir+endpoint['js']['file_name'], "w") as cur_endpoint:
             cur_endpoint.write(
-                render_to_string('introspective_api/endpoint_template.js', {
+                render_to_string(api_settings.JS_ENDPOINT_TEMPLATE, {
                     'endpoint': endpoint,
                     'config': config
                     })

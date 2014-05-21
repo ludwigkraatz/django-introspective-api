@@ -30,6 +30,8 @@ DEFAULTS = {
     'RELATED_VIEWS_IN_HEADER': True,
     
     'STATIC_ENDPOINT_CONFIG': 'introspective_api.endpoints.get_statics_config',
+    'JS_ENDPOINT_TEMPLATE': 'introspective_api/endpoint_template.js',
+    'STATIC_ENDPOINT_FOLDER': settings.STATIC_ROOT+'js/endpoint/',
         
     'LOG_CLIENT': False,
     
