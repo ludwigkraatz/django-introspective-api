@@ -536,6 +536,23 @@ class APIRoot(ApiEndpointMixin, APIView):
         return ApiResponse(
             api_root.generate_sitemap(version)
         )
+        
+    def options(self, request, *args, **kwargs):
+        version = request.GET.get('version', '1.0')
+        
+        ret = super(APIRoot, self).options(request, *args, **kwargs)
+        ret = ret.data
+        
+        # TODO make dynamic
+        ret['actions'] = {
+            'getSitemap': {},
+            'getCredentials': {}
+        }
+        #ret['sitemap'] = api_root.generate_sitemap(version)
+        
+        return ApiResponse(
+            ret
+        )
     
     def has_url(self, ):
         return True
