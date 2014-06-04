@@ -545,8 +545,12 @@ class APIRoot(ApiEndpointMixin, APIView):
         
         # TODO make dynamic
         ret['actions'] = {
-            'getSitemap': {},
-            'getCredentials': {}
+            'POST':{
+                'action': {
+                    'choices':['getSitemap', 'getCredentials']
+                }                
+            }
+            
         }
         #ret['sitemap'] = api_root.generate_sitemap(version)
         
