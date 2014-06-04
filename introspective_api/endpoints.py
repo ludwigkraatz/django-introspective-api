@@ -219,6 +219,21 @@ class ApiEndpointMixin(object):
         
         if type(config.get('view')) == type(ViewClass):
             config['view_class'] = config.pop('view')
+        
+        elif config.get('view_config'):
+            view_config = config.get('view_config')
+            view_model = view_config.get('model')
+            from . import serializers
+            class AutoSerializer(serializers.ModelSerializer):
+                _options_class = serializers.HyperlinkedModelSerializerOptions            
+                class Meta:
+                    model       =   view_model
+
+            class AutoView(view_config.get('base_view')):
+                serializer_class = AutoSerializer    
+                model = view_model
+            
+            config['view_class'] = AutoView
             
         endpoint = ApiEndpoint(
                         name=name,
