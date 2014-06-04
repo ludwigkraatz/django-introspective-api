@@ -12,6 +12,7 @@ from django.conf import settings
 import copy
 
 class ApiEndpointMixin(object):
+    SELECTOR_ENDPOINT = 'select' #TODO: Select should return 0/1, filter many
     FILTER_ENDPOINT = 'filter'
     REDIRECT_ENDPOINT = 'redirect'
     ROOT_ENDPOINT = 'root'
@@ -75,6 +76,14 @@ class ApiEndpointMixin(object):
         #    return dec
         
         return self._register_endpoint(name, **config)
+    
+    def register_selector(self, name, pattern, **config):
+        """
+        @brief a selector is an endpoint that is applied on the current "collection kind" endpoint and results in (n)one result.
+        """
+        config['type']      = self.SELECTOR_ENDPOINT
+        config['pattern']   = pattern
+        return self.register_endpoint(name, **config)
     
     def register_filter(self, name, pattern, **config):
         """
@@ -202,7 +211,7 @@ class ApiEndpointMixin(object):
             raise ImproperlyConfigured, 'redirect Endpoint "%s" can not register endpoints' % self.name   
         
         if name in self._endpoints:
-            if config.get('type') != self.FILTER_ENDPOINT:
+            if config.get('type') not in [self.FILTER_ENDPOINT, self.SELECTOR_ENDPOINT]:
                 raise ImproperlyConfigured, 'endpoint "%s" found twice' % name
             if (any(endpoint.pattern == config.get('pattern') for endpoint in self._endpoints[name])):
                 raise ImproperlyConfigured, 'filtered Endpoint "%s" with pattern "%s" found twice' % (self.name, config.get('pattern'))
@@ -277,7 +286,7 @@ class ApiEndpoint(ApiEndpointMixin):
         if parent_field:
             self.lookup_fields[self.parent] = parent_field
         
-        if self.type == self.FILTER_ENDPOINT:
+        if self.type in [self.FILTER_ENDPOINT, self.SELECTOR_ENDPOINT]:
             self.lookup_fields['self'] = lambda endpoint, request, *args, **kwargs: {endpoint.get_fitlers_field_name(): kwargs.get(endpoint.get_name(), None)}
             
         #user_field              = config.pop('user_field', None)
@@ -294,7 +303,7 @@ class ApiEndpoint(ApiEndpointMixin):
                 kwargs = {}
                 kwargs['endpoint']  = self
                 
-                if self.type == self.FILTER_ENDPOINT:
+                if self.type in [self.FILTER_ENDPOINT, self.SELECTOR_ENDPOINT]:
                     lookup_field = self.get_name()
                     if getattr(self.view_class, 'lookup_field', None) != lookup_field:
                         setattr(self.view_class, 'lookup_field', lookup_field)
@@ -341,7 +350,7 @@ class ApiEndpoint(ApiEndpointMixin):
         """
         @returns the url, this endpoint is accessible with
         """
-        if self.type == self.FILTER_ENDPOINT:
+        if self.type in [self.FILTER_ENDPOINT, self.SELECTOR_ENDPOINT]:
             url = '(?P<%s>%s)' % (self.get_name(), self.pattern)
         elif self.type is None:
             url = '%s' % self.name
@@ -403,7 +412,7 @@ class ApiEndpoint(ApiEndpointMixin):
         @returns the sitemap url string
         @brief the sitemap urls might contain {vars} when in the sitemap.json or (vars)%s for django urls (python formatting)
         """
-        if self.type == self.FILTER_ENDPOINT:
+        if self.type in [self.FILTER_ENDPOINT, self.SELECTOR_ENDPOINT]:
                 
             if not python_formatting:
                 # href - LINK Template formatting
