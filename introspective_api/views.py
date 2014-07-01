@@ -10,11 +10,15 @@ from django.views.decorators.csrf import csrf_exempt
 class APIView(APIView):
     settings = api_settings
     endpoint = None
-    
+    config = None
+
     @csrf_exempt
     def dispatch(self, *args, **kwargs):
         return super(APIView, self).dispatch(*args, **kwargs)
-    
+
+    def get_config(self):
+        return self.config or {}
+
 
     #def get_format_suffix(self, **kwargs):
     #    """
