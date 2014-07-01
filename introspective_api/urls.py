@@ -7,7 +7,7 @@ from django.utils import importlib
 
 from .endpoints import api_root
 from .settings import api_settings
-                       
+
 for app in settings.INSTALLED_APPS:
     try:
         # import the api models now
@@ -16,7 +16,5 @@ for app in settings.INSTALLED_APPS:
     except ImportError, e:
         if str(e) != 'No module named api' and str(e) != 'No module named {app}.api'.format(app=app):
             raise
-
- 
 
 urlpatterns = api_root.url_patterns
