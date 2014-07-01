@@ -14,7 +14,7 @@ from rest_framework.request import clone_request
 import warnings
 
 from introspective_api.settings import api_settings
-from introspective_api import views, mixins
+from introspective_api import views, mixins, renderers
 
 
 def get_object_or_404(queryset, **filter_kwargs):
@@ -96,7 +96,7 @@ class GenericAPIView(views.APIView):
                     data["id"] = self.request.user.pk
                 else:
                     data[self._me_creating__object_name] = self.request.user.pk
-            
+
         serializer_class = self.get_serializer_class()
         context = self.get_serializer_context()
         return serializer_class(instance, data=data, files=files,
@@ -190,7 +190,7 @@ class GenericAPIView(views.APIView):
         for backend in filter_backends:
             queryset = backend().filter_queryset(self.request, queryset, self)
         return queryset
-    
+
     ########################
     ### The following methods provide default implementations
     ### that you may want to override for more complex cases.
@@ -287,16 +287,16 @@ class GenericAPIView(views.APIView):
             queryset = self.filter_queryset(self.get_queryset())
         else:
             pass  # Deprecation warning
-        
+
         filter_kwargs = self.endpoint.get_object_filter(self.request, *self.args, **self.kwargs)
-        
+
         if not filter_kwargs:
             raise ImproperlyConfigured(
                 'Expected view %s to be called with a list of field lookups'
                 '"%s" could not be translated accordingly' %
                 (self.__class__.__name__, str(self.kwargs))
             )
-        
+
 
         obj = get_object_or_404(queryset, **filter_kwargs)
 
@@ -304,21 +304,21 @@ class GenericAPIView(views.APIView):
         self.check_object_permissions(self.request, obj)
 
         return obj
-    
+
     def get_related_object(self, obj_name, init_kwargs=None):
         if obj_name in self.endpoint.depends_on:
             endpoint = self.endpoint.depends_on[obj_name]
-            
+
             init_kwargs = init_kwargs or {}
             init_kwargs['endpoint'] = endpoint
             init_kwargs['dispatch'] = False
-            
+
             view = endpoint.view_class.as_view(**init_kwargs)
-            
+
             return view(self.request, *self.args, **self.kwargs).get_object()
-        
+
         raise Exception, 'dependency not declared' # TODO
-    
+
 
     ########################
     ### The following are placeholder methods,
@@ -482,7 +482,7 @@ class RetrieveUpdateDestroyAPIView(mixins.RetrieveModelMixin,
                                    GenericAPIView):
     """
     Concrete view for retrieving, updating or deleting a model instance.
-    """    
+    """
     def get(self, request, *args, **kwargs):
         return self.retrieve(request, *args, **kwargs)
 
@@ -494,7 +494,6 @@ class RetrieveUpdateDestroyAPIView(mixins.RetrieveModelMixin,
 
     def delete(self, request, *args, **kwargs):
         return self.destroy(request, *args, **kwargs)
-
 
 ##########################
 ### Deprecated classes ###
