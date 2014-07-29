@@ -63,7 +63,19 @@ class ApiEndpointMixin(object):
         @brief an endpoint can be deactivated explicitly, if not done when it was registered
         """
         self._endpoint_registry[name] = False
+    """
+    def get_or_register_endpoint(self, *args, **kwargs):
+        try:
+            return self.register_endpoint(*args, **kwargs)
+        except ImproperlyConfigured:
+            return self.get_endpoint(*args, **kwargs)
 
+    def get_endpoint(self, name, **config):
+        if name in self._endpoints:
+            # TODO: filter correct endpoint by config...
+            return self._endpoints[name][0]
+        raise Exception('Endpoint "%s" not found' % name)
+    """
     def register_endpoint(self, name, **config):
         """
         @brief this method registers a standard endpoint as "child" of the current one
