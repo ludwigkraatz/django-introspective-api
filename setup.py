@@ -1,12 +1,14 @@
 from setuptools import setup, find_packages
+from pip.req import parse_requirements
+
+requirements = []
+dependencies = []
 
 
-def get_path(fname):
-    return os.path.join(os.path.dirname(__file__), fname)
-
-
-def read(fname):
-    return open(get_path(fname)).read()
+for requirement in parse_requirements('requirements.txt'):
+    requirements.append(str(requirement.req))
+    if requirement.url:
+        dependencies.append(str(requirement.url))
 
 
 setup(
@@ -16,5 +18,6 @@ setup(
     version='0.1',
     packages=find_packages(),
     include_package_data=True,
-    install_requires=read('requirements.txt').split("\n"),
+    install_requires=requirements,
+    dependency_links=dependencies
 )
