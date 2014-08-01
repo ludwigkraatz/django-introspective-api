@@ -6,10 +6,9 @@ dependencies = []
 
 
 for requirement in parse_requirements('requirements.txt'):
+    requirements.append(str(requirement.req))
     if requirement.url:
         dependencies.append(str(requirement.url))
-    else:
-        requirements.append(str(requirement.req))
 
 
 setup(
