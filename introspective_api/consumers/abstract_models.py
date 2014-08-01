@@ -109,8 +109,7 @@ class AbstractBaseAccessKey(Model):
         
     def get_artifacts(self):
         return self._artifacts
-    
-    
+
 
 class AbstractLimitedConsumer(AbstractBaseConsumer):
     class Meta:
@@ -121,9 +120,7 @@ class AbstractLimitedConsumer(AbstractBaseConsumer):
     usable_for  =   models.ManyToManyField('auth.Permission', related_name='registered_consumers')
     successor   =   models.ForeignKey('self', related_name='ancestors', null=True, blank=True)
 
-    
-    
-    
+
 class AbstractLimitedAccessKey(AbstractBaseAccessKey):
     """
         a limited Access Key inherits its valid_*, usable_* attributes by its consumer and user.
@@ -134,13 +131,11 @@ class AbstractLimitedAccessKey(AbstractBaseAccessKey):
     valid_until =   models.DateTimeField(default=valid_until_default)
     usable_for  =   models.ManyToManyField('auth.Permission', related_name='registered_keys')
     successor   =   models.ForeignKey('self', related_name='ancestors', null=True, blank=True)
-    
-    
+
     def is_valid(self, ):
         _now = now()
         return self.valid_from <= _now and self.valid_until > _now
-    
-    
+
 class ConsumerManager(Manager):
     def create_user(self, *args, **kwargs):
         new_kwargs = {
@@ -148,7 +143,7 @@ class ConsumerManager(Manager):
             "secret": kwargs.pop('password')
         }
         new_kwargs.update(kwargs)
-        self.create_consumer(*args,**new_kwargs)
+        self.create_consumer(*args, **new_kwargs)
     def create_consumer(self, description, **useless):
         return self.create()
 
