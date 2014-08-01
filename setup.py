@@ -8,12 +8,11 @@ dependencies = []
 for requirement in parse_requirements('requirements.txt'):
     if requirement.url:
         url = str(requirement.url)
-        egg = url.split('#egg=')
+        egg = url.split('#egg=')[-1]
         if '#egg=' in url and '.' in egg:
             version = egg.split('-')[-1]
             requirements.append(str(requirement.req) + '==' + version)
-        else:
-            dependencies.append(url)
+        dependencies.append(url)
     else:
         requirements.append(str(requirement.req))
 
@@ -22,7 +21,7 @@ setup(
     name="introspective-api",
     author="Ludwig Kraatz",
     author_email="code@suncircle.de",
-    version='0.1.7',
+    version='0.1.8',
     packages=find_packages(),
     include_package_data=True,
     install_requires=requirements,
