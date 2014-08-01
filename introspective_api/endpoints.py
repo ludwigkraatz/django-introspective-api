@@ -560,6 +560,10 @@ class APIRoot(ApiEndpointMixin, APIView):
             credentials_view    = api_settings.API_CREDENTIALS_VIEW
             return credentials_view(request, *args, **kwargs)
 
+        elif action == 'revalidateCredentials':
+            credentials_view    = api_settings.API_CREDENTIALS_VIEW
+            return credentials_view(request, *args, **kwargs)
+
         elif action == 'getSitemap':
             version = request.DATA.get('version', '1.0')
             return ApiResponse(
