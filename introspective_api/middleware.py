@@ -5,7 +5,7 @@ from django.utils.functional import SimpleLazyObject
 from django.contrib.auth import get_user_model
 from introspective_api.client import InstrospectiveApiException
 from introspective_api.exceptions import ApiKeyNeedsRevalidation, InvalidKey
-from django.utils import simplejson as json
+import json
 from introspective_api import get_access_key_model, get_consumer_model
 
 from django.utils import timezone
