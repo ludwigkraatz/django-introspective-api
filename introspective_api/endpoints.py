@@ -12,6 +12,7 @@ from django.conf import settings
 import copy
 
 
+
 class ApiEndpointMixin(object):
     SELECTOR_ENDPOINT = 'select' #TODO: Select should return 0/1, filter many
     FILTER_ENDPOINT = 'filter'
@@ -76,6 +77,7 @@ class ApiEndpointMixin(object):
             return self._endpoints[name][0]
         raise Exception('Endpoint "%s" not found' % name)
     """
+
     def register_endpoint(self, name, **config):
         """
         @brief this method registers a standard endpoint as "child" of the current one
@@ -552,7 +554,7 @@ class APIRoot(ApiEndpointMixin, APIView):
                 ]
             }
         }
-
+    """
     def post(self, request, *args, **kwargs):
         action = request.DATA.get('action', None)
 
@@ -576,22 +578,14 @@ class APIRoot(ApiEndpointMixin, APIView):
         return ApiResponse(
             api_root.generate_sitemap(version)
         )
-
+    """
     def options(self, request, *args, **kwargs):
         version = request.GET.get('version', '1.0')
 
         ret = super(APIRoot, self).options(request, *args, **kwargs)
         ret = ret.data
 
-        # TODO make dynamic
-        ret['actions'] = {
-            'POST':{
-                'action': {
-                    'choices':['getSitemap', 'getCredentials']
-                }
-            }
-
-        }
+        ret.update(api_root.generate_sitemap(version))
         #ret['sitemap'] = api_root.generate_sitemap(version)
 
         return ApiResponse(
@@ -617,7 +611,7 @@ class APIRoot(ApiEndpointMixin, APIView):
         self._view_names[namespace].append(view_name)
 
     def register(self, endpoint, **config):
-        config['active'] = config.get('active', False)
+        config['active'] = config.get('active', bool(config.get('view_name', None)))
         return super(APIRoot, self).register(endpoint, **config)
 
     def is_active(self, endpoint=None):
