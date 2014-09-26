@@ -1,4 +1,4 @@
-define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2) {    
+define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiObject, JSON2) {    
     function ApiClient() {
         this.init.apply(this, arguments);
     };
@@ -103,7 +103,7 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
                 }
                 this.add_urgent({
                     uri: '/',
-                    data: {action: 'getSitemap'},
+                    type: 'OPTIONS',
                     ignoreLock: true,
                     isApiInternal: true,
                     done: function(response, status, jqXHR){
@@ -124,7 +124,9 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
         
         initialize: function(callback){
             this.getSitemap(function(){
-                callback();
+                if (callback){
+                    callback();
+                }
             })
         },
         
@@ -256,7 +258,7 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
         
             
             if (this.debug_level > 0)
-                console.log(ajax);
+                console.log('(info)', '[Introspective ApiClient]', 'request:', ajax);
             var jqxhr = this.ajax(ajax);
             
                 jqxhr.done(function(response, status, xhr){
@@ -297,7 +299,7 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
     
     
         init: function(settings){
-            
+            console.log('(init)', '[Introspective ApiClient]', 'settings:', settings)
             var tmp = settings.endpoint.split('://');
             if (tmp.length == 1) {
                 tmp = tmp[0];
@@ -307,9 +309,14 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
                 this.protocol = tmp[0];
             }
             var tmp2 = tmp.split("/");
-            
-            this.host = tmp2[0];
-            delete tmp2[0];
+
+            if (tmp2[0] == '') {
+                this.host = 'localhost:8001'; // TODO: get current host
+            }else {
+                this.host = tmp2[0];
+                delete tmp2[0];
+            }
+            console.log('(info)', '[Introspective ApiClient]', 'host:', this.host)
             this.endpoint = tmp2.join('/');
             this.crossDomain = settings.crossDomain;
             
@@ -796,7 +803,8 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
         },
         
         refreshCredentials: function(settings){
-            var $this = this;
+            var $this = this,
+                type = 'get';
             if (! settings) {
                 settings = {};
             }
@@ -805,21 +813,18 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
                 throw Error("Refreshing Credentials needs the endpoint to be set")
             }
             
-            var authData = {};
-            if (settings.forceRefresh) {
-                authData.action = 'revalidateCredentials';
-            }else{
-                authData.action = 'getCredentials';
-            }
-            
             if (settings.sendAuth) {
                 authData.username = settings.username;
                 authData.password = settings.password;
             }
             
+            if (settings.forceRefresh || settings.sendAuth) {
+                type = 'post';
+            }
+            
             this.add_urgent({
-                uri: '/',
-                type: 'post',
+                uri: '/auth/credentials/',
+                type: type,
                 data: authData,
                 /*
                  * the CSRF header comes from the 'host domain' of this website. it is the consumer key
@@ -859,23 +864,22 @@ define(['jquery', 'ajax-object', 'json', 'hawk'], function ($, ApiObject, JSON2)
         
         
         get: function(target, callback){            
-            var obj = new ApiObject(this, null, target);
+            var obj = new ApiObject({apiClient:this, target:target});
             return obj.__onGet()
         },
         access: function(target, callback){            
-            var obj = new ApiObject(this, null, target);
+            var obj = new ApiObject({apiClient:this, target:target});
             return obj.__onGet(true)
         },
         
         load: function(target, callback){            
-            var obj = new ApiObject(this, null, target);
+            var obj = new ApiObject({apiClient:this, target:target});
             obj.load(callback);
             return obj.__onLoad()
         },
         
         login: function(username, password, callback){
             this.refreshCredentials({
-                action: 'getCredentials',
                 expectsResult: true,
                 sendAuth: true,
                 username: username,

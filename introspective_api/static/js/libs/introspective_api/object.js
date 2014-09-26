@@ -23,14 +23,15 @@ define(['jquery'], function ($) {
     
     $.extend(ApiResult.prototype, {
         
-        init: function(obj){
-            
+        init: function(obj, raw){
+            this.raw = raw || false;
             this.results= [];
             this.obj= obj;
             this.settings= {};
             this.wasSuccessfull= undefined;
             this.request= {};
             this.ajaxID= null;
+            this.response = undefined;
             this.responseText = undefined;
         },
         
@@ -49,7 +50,12 @@ define(['jquery'], function ($) {
         },
         
         registerSuccess: function(response, status, jqXHR){
-            this.responseText = jqXHR.responseText;
+            if (this.raw) {
+                this.response = response;
+            }{
+                this.responseText = jqXHR.responseText;
+            }
+            
             this.setStatus('ok', status, true);
         },
         
@@ -58,7 +64,12 @@ define(['jquery'], function ($) {
             this.responseText = jqXHR.responseText;
         },
         
-        wasCached: function(){
+        wasCached: function(responseText){
+            if (this.raw) {
+                this.response = responseText;
+            }else{
+                this.responseText = responseText;
+            }
             this.setStatus('ok', 'cached', true);
         },
         
@@ -88,10 +99,14 @@ define(['jquery'], function ($) {
         },
         
         getContent: function(format){
-            if (format === undefined) {
-                format = this.getFormat();
+            if (this.raw) {
+                return this.response
+            }else{
+                if (format === undefined) {
+                    format = this.getFormat();
+                }
+                return this.obj.__onLoad(format);                
             }
-            return this.obj.__onLoad(format);
         },
         
         getObject: function(){
@@ -155,14 +170,18 @@ define(['jquery'], function ($) {
     
     $.extend(ApiObject.prototype, {   
         
-        __reset:  function(){
+        __reset:  function(initialContent){
+            if (initialContent === undefined) {
+                initialContent = {}
+            }
+
             this.__data = {};
             this.__links = {};
             this.__URIlinks = {};
             this.__URLlinks = {};
             
-            this.__origContent = {'json':{}};
-            this.__content = {'json':{}};
+            this.__origContent = {'json': $.extend(true, {}, initialContent)};
+            this.__content = {'json':initialContent};
             this.__objects = {};
             this.__unevaluatedObjects = {};
             this.__domElements = [];
@@ -180,8 +199,15 @@ define(['jquery'], function ($) {
             this.__path = null
         },
         
-        __init: function(apiClient, parent, target, data, asClone){      
-            this.__reset();
+        __init: function(settings){
+            // settings:
+            var apiClient = settings.apiClient,
+                parent = settings.parent,
+                target = settings.target,
+                data = settings.data,
+                asClone = settings.asClone,
+                initialContent = settings.initialContent;
+            this.__reset(initialContent);
             
             if (target == null) {
                 this.__data       = data;
@@ -294,19 +320,24 @@ define(['jquery'], function ($) {
             return url;
         },
         
-        __asResult: function(action, settings){
-            var result = new ApiResult(this);
+        __asResult: function(action, settings, raw){
+            var result = new ApiResult(this, raw);
             result.registerSettings(settings);
             return result
         },
         
         __isCreated: function(){// todo
-            return this.__sync.length > 0;
+            return this.__sync.length > 0 && this.__data;
         },
         
+        __new: function(settings){
+            if (settings === undefined) {
+                settings = {}
+            }
+            return new LinkedResource({apiClient:this.__apiClient, parent:this, data:null, target:null, asClose:true, initialContent:settings.initialContent});
+        },
         __create: function(data, callback){
-            var obj = new LinkedResource(this.__apiClient, this, null, data);
-            
+            obj = new LinkedResource({apiClient:this.__apiClient, parent:this, target:null, data:data, asClone:true, initialContent:data});
             request = {
                 data: data,
                 type: 'post',
@@ -549,7 +580,7 @@ define(['jquery'], function ($) {
         },
         
         __getID: function(){
-            return 1;
+            return this.__data['uuid'] || this.__data['id']
         },
         
         __parseTarget: function(target, data){
@@ -566,6 +597,13 @@ define(['jquery'], function ($) {
                 }
             }
             return target
+        },
+        
+        __fromFixture: function(fixture){
+            this.__updateContent(fixture, 'json', false, {format: 'json'})
+            this.__initialized = true;
+            this.__initializing = undefined;
+            return this
         },
         
         __get: function(targetOrSettings, _data, wrapped){
@@ -597,18 +635,17 @@ define(['jquery'], function ($) {
             
             if (target) {
                 if (($this.__links[target] != undefined) && ($this.__objects[targetID] === undefined)){
-                
-                    $this.__objects[targetID] = new LinkedResource(this.__apiClient, this, target, data);
+                    $this.__objects[targetID] = new LinkedResource({apiClient:this.__apiClient, parent:this, target:target, data:data, initialContent:settings.initialContent});
                     
-                }else if ($this.__objects[targetID] === undefined && $this.__initialized != true) {
-                    var attribute = new ResourceAttribute($this.__apiClient, $this, target, null);
+                }else if ($this.__objects[targetID] === undefined && $this.__content[target] != undefined) {
+                    var attribute = new ResourceAttribute({apiClient: $this.__apiClient, parent:$this, target:target, data:null, initialContent:settings.initialContent});
+                    $this.__objects[targetID] = attribute;
+                }else if ($this.__objects[targetID] === undefined){// && $this.__initialized != true) {
+                    var attribute = new ResourceAttribute({apiClient:$this.__apiClient, parent:$this, target:target, data:null, initialContent:settings.initialContent});
                     
                     $this.__unevaluatedObjects[targetID] = attribute;
                     $this.__objects[targetID] = attribute;
                         
-                }else if ($this.__objects[targetID] === undefined && $this.__content[target] != undefined) {
-                    var attribute = new ResourceAttribute($this.__apiClient, $this, target, null);
-                    $this.__objects[targetID] = attribute;
                 }
                 
                 if ($this.__objects[targetID] != undefined) {
@@ -622,7 +659,7 @@ define(['jquery'], function ($) {
                     throw Error('target "'+ target +'" not found');
                 }   
             }else{
-                return new ApiObject(this.__apiClient, this, null, data, true)
+                return new ApiObject({apiClient:this.__apiClient, parent:this, target:null, data:data, asClone:true, initialContent:settings.initialContent})
             }
             
                      
@@ -645,6 +682,7 @@ define(['jquery'], function ($) {
                     for (var obj in this.__content[format]) {
                         content[obj] = this.__content[format][obj];               
                     }
+                    /* this interferes with lists
                     for (var obj in this.__objects) {
                         if (onLoad) {
                             content[obj] = this.__objects[obj].__onLoad(format)
@@ -652,7 +690,7 @@ define(['jquery'], function ($) {
                         }else{
                             content[obj] = this.__objects[obj].__onGet(wrapped, format)
                         }                    
-                    }
+                    }*/
                     return content
                 }else{
                     return this.__content[format]
@@ -737,6 +775,86 @@ define(['jquery'], function ($) {
             return $this;
         },
         
+        __discover: function(callbackOrSettings){
+            var settings = {};
+            
+            if (callbackOrSettings instanceof Function) {
+                settings['callback'] = callbackOrSettings
+            }else{
+                $.extend(settings, callbackOrSettings);                
+            }
+            
+            var $this = this;
+            
+            var result = this.__asResult('discover', settings, true); // raw
+            
+            
+            if (this.__discovering != undefined) {
+                //var result = this.__asResult('discover', settings);
+                var callbacks = {};
+                callbacks.done = function(response, status, jqXHR){
+                    result.registerSuccess(response, status, jqXHR);
+                    settings.callback(result);
+                }
+                callbacks.fail = function(jqXHR, statusText, errorThrown){
+                    result.registerFailure(jqXHR, statuText, errorThrown);
+                    settings.callback(result);
+                }
+                
+                this.__apiClient.registerCallbacksForRequest(this.__discovering, callbacks);
+                
+            }else if (this.__discovered && (settings.forceReload === undefined || settings.forceReload === false)) {
+                //var result = this.__asResult('discover', settings);
+                result.wasCached($this.__discovered);
+                settings.callback(result);
+            }else{
+            
+                $this.__startLoading();
+                var request = {
+                    type: 'options',
+                    done: function (response, text, jqXHR) {                
+                        $this.__finnishedLoading();
+                        $this.__discovered = response;
+                        $this.__discovering = undefined;
+                        result.registerSuccess(response, text, jqXHR);
+                        if (settings.callback instanceof Function) {
+                            settings.callback(result); 
+                        }               
+                
+                    },
+                    fail: function (jqXHR, statuText, errorThrown) {                
+                        $this.__finnishedLoading();
+                        result.registerFailure(jqXHR, statuText, errorThrown);
+                        if (settings.callback instanceof Function) {
+                            settings.callback(result);      
+                        }               
+                
+                    },
+                    isApiInternal: true,
+                };
+                $this.__setURL(request);
+                if (settings.format) {
+                    var format = settings.format;
+                    if (typeof format == 'string') {
+                        format = {format: format};
+                    }
+                    request.dataType = format.format;
+                    delete format.format
+                    for  (var arg in format) {
+                        // doto: ass query args
+                    }
+                }
+                var ajaxID = $this.__apiClient.add(request);
+                if ($this.__discovering === undefined) {
+                    $this.__discovering = ajaxID;
+                };          
+                $this.__sync.push(ajaxID);
+                result.registerRequest(ajaxID, request);
+            }
+            
+            return result
+        },
+        
         __load: function(callbackOrSettings){
             var settings = {};
             if (callbackOrSettings instanceof Function) {
@@ -761,7 +879,7 @@ define(['jquery'], function ($) {
                 
                 this.__apiClient.registerCallbacksForRequest(this.__initializing, callbacks);
                 
-            }else if (this.__initialized && (settings.forceReload === undefined || settings.forceReload === false)) {
+            }else if (!settings.format && this.__initialized && (settings.forceReload === undefined || settings.forceReload === false)) {
                 var result = this.__asResult('load', settings);
                 result.wasCached();
                 settings.callback(result);
@@ -851,15 +969,18 @@ define(['jquery'], function ($) {
             }
                         
             if (dataType.indexOf('json') != -1) {
-                
                 $.extend(this.__content['json'], content);
                 
                 if (content instanceof Array) {
                     for (var entry in content) {
-                        var obj = new ApiObject(this.__apiClient, this, null, content[entry], true);
+                        var obj = new ApiObject({apiClient: this.__apiClient, parent: this, target: null, data: content[entry], asClone:true});
                         obj.__updateContent(content[entry], dataType, uncommitted, settings);
                         obj.__initialized = true;
-                        this.__objects[obj.__getID()] = obj;
+                        var id = obj.__getID();
+                        if (id) {
+                            // TODO: because introspective api requires UUID, maybe rather use a global __objects storage
+                            this.__objects[id] = obj;
+                        }
                     }
                     
                 }else if (content instanceof Object) {
@@ -993,34 +1114,50 @@ define(['jquery'], function ($) {
             $.each(domElement.find(':input'), function(index, elem){
                 var name = $(elem).attr('name');
                 if (name)inputTargets.push(name);
-            });            
-             
-            this.__prepare(inputTargets, function(result){
-                
-                var $this = result.getObject();
-                
-                for (var obj in $this.__objects) {
-                    var target = obj.split('|')[0];
-                    var input = domElement.find(':input[name="'+target+'"]');
-                    if (input.size()) {
-                        $this.__objects[obj].connect(input);
+            });
+            if (this.__initialized || self.__data) {
+                this.__prepare(inputTargets, function(result){
+                    var $this = result.getObject();
+                    for (var obj in $this.__objects) {
+                        var target = obj.split('|')[0];
+                        var input = domElement.find(':input[name="'+target+'"]');
+                        if (input.size()) {
+                            $this.__objects[obj].connect(input);
+                        }
                     }
-                }
-                if (callback instanceof Function) {
-                    callback(result);
-                }
-                
-            }, true);
+                    
+                        
+                    if (callback instanceof Function) {
+                        callback(result);
+                    }
+                })
+            }else{
+                this.__discover({
+                    //data: inputTargets,
+                    callback: function(result){
+                        var $this = result.getObject();
+                        var content = result.getContent();
+                        for (var obj in content['actions']['POST']) {
+                            var target = obj;
+                            var input = domElement.find(':input[name="'+target+'"]');
+                            if (input.size()) {
+                                $this.__get(target).connect(input);
+                            }
+                        }
+                        
+                    },
+                });
+            };
             
             var submitButton = domElement.find(':submit');
             if (submitButton.size()) {
                 var $this = this;
-                submitButton.on('click.introspective-api-object.'+this.__getID(), function(event){
+                submitButton.click(function(event){ // on('click.introspective-api-object.'+this.__getID()
                     event.stopImmediatePropagation();
                     try{
                         $this.__save();
                     }catch (e){
-                        console.log(e)
+                        console.error(e.stack)
                     }
                     return false;
                 });
@@ -1079,6 +1216,10 @@ define(['jquery'], function ($) {
             return this.__load.apply(this, arguments)
         },
         
+        discover: function(){
+            return this.__discover.apply(this, arguments)
+        },
+        
         create: function(){
             return this.__create.apply(this, arguments)
         },
@@ -1117,6 +1258,10 @@ define(['jquery'], function ($) {
         
         asForm: function(){
             return this.__asForm.apply(this, arguments)
+        },
+        
+        fromFixture: function(){
+            return this.__fromFixture.apply(this, arguments)
         }
         
         
@@ -1128,8 +1273,12 @@ define(['jquery'], function ($) {
     
     $.extend(ResourceAttribute.prototype, ApiObject.prototype);
     $.extend(ResourceAttribute.prototype, {
-        __init: function(apiClient, parent, target, data){
-            this.__reset();
+        __init: function(settings){
+            var apiClient = settings.apiClient,
+                parent = settings.parent,
+                target = settings.target,
+                data = settings.target;
+            this.__reset(settings.initialContent);
             this.__apiClient  = apiClient;
             this.__data       = data;
             this.__parent     = parent;
@@ -1237,16 +1386,20 @@ define(['jquery'], function ($) {
             domElement = $(domElement);
             this.__domElements.push(domElement);
             
-            domElement.on('change.introspective-api-object.' + this.__parent.__getID(), this.__get_updatedHandler(this, autoSubmit));
+            domElement.change(this.__get_updatedHandler(this, autoSubmit)); // on('change.introspective-api-object.' + this.__parent.__getID(), 
             
-            this.__load(function(result){
-                domElement.val(result.getContent()).change();
+            if (this.__parent.__isCreated()) {
+                this.__load(function(result){
+                    domElement.val(result.getContent()).change();
+                    if (callback instanceof Function) {
+                        callback(result);
+                    }   
+                })
+            }else{
                 if (callback instanceof Function) {
                     callback(result);
-                }   
-            })
-            
-           
+                }
+            }
 
         },
         

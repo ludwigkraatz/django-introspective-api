@@ -23,7 +23,8 @@ define(["jquery", "introspective-api-client"], function($, IntrospectiveApiClien
         
         xhrFailHandlerMap: {},
         
-        init: function(){
+        init: function(settings){
+            console.log('(init)', '[Introspective ApiEndpoint]', 'settings:', settings)
             var $this = this;
             
             this.config = settings;
@@ -236,7 +237,7 @@ define(["jquery", "introspective-api-client"], function($, IntrospectiveApiClien
             });
             
             this.ajax.registerExternalFailHandlers(this, this.xhrFailHandlerMap);
-            this.ajax.initialize(callback);
+            this.ajax.initialize(settings.callback);
             
         },
         
