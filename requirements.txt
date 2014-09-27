@@ -1,4 +1,4 @@
--e git+git://github.com/ludwigkraatz/django-rest-framework.git@0057e80c90ca76c6ff74a104398196c9dd8e505f#egg=djangorestframework
+-e git+git://github.com/ludwigkraatz/django-rest-framework.git@0057e80c90ca76c6ff74a104398196c9dd8e505f#egg=djangorestframework-2.3.6
 django>=1.5
 pyhawk==0.1.3
-jsonfield==0.9.17
+jsonfield==0.9.12
