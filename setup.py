@@ -21,9 +21,10 @@ setup(
     name="introspective-api",
     author="Ludwig Kraatz",
     author_email="code@suncircle.de",
-    version='0.1.12',
+    version='0.1.13',
     packages=find_packages(),
     include_package_data=True,
+    package_data={'introspective_api': ['introspective_api/static', 'introspective_api/templates']},
     install_requires=requirements,
     dependency_links=dependencies
 )
