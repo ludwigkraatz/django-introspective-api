@@ -22,6 +22,53 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         }
         return true
     }
+    function ApiObjectEvent() {
+        this.init.apply(this, arguments)
+    }
+    $.extend(ApiObjectEvent.prototype, {
+        init: function(name){
+            this.name = name;
+        }
+    })
+    
+    // event.subEvent
+    // => every time an subEvent is called, the event is called some time afterwards (it may take several subevents until event is called)
+    var apiObjectEvents = {
+        
+        // callback(event, apiResult)
+        'post-save': {},
+        //'post-save-related': {},
+        'post-create': {},
+        'post-load': {
+            'post-refresh': {}
+        },
+        'post-discover': {},
+        'post-delete': {},
+        'set-fixture': {},
+        
+        // callback(event, apiResult)
+        'start-loading': {
+            'load-more': {}
+        },
+        'finished-loading': {
+            'loaded-one': {}
+        },
+
+        // callback(event, apiObject)
+        'replaced': {},
+
+        // callback(event, target, value)
+        'changed': {},
+
+        // callback(event, format, content)
+        'updated': {},
+
+        // callback(event, apiObject)
+        'accessed-related': {},
+        'accessed-attribute': {},
+        'accessed-unknown': {},
+        'accessed-clone': {}
+    }
         
     function ApiResult() {
         this.init.apply(this, arguments);
