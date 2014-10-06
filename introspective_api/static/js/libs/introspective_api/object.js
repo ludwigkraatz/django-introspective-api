@@ -1423,6 +1423,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __update: function(newContent){
             var $this = this;
+            if (JSON.stringify(newCOntent) === JSON.stringify(this.__content['json'])) {
+                return
+            }
             $this.__updateContent(newContent);
             
             var content = $this.__onGet(false);
