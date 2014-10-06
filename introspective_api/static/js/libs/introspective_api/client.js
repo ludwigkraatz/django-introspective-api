@@ -99,6 +99,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             var $this = this;
             if (this.sitemap === null) {
                 if (callback == undefined) {
+                    _log(this.__log, 'error', ['api endpoint wasn\'t initialized']);
                     throw Error('api endpoint wasnt initialized');
                 }
                 this.add_urgent({
@@ -588,7 +589,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 return jqXHR.responseText ? JSON.parse(jqXHR.responseText) : {};
             } catch(e) {
                 responseHTML = jqXHR.responseText ? $(jqXHR.responseText) : null;
-                responseJSON = {};
+                responseJSON = {}; // TODO: make the classes dynamic
                 if (responseHTML != null && responseHTML.hasClass("expn-error")) {
                     responseJSON.msg = responseHTML.find('.expn-msg').html();
                     responseJSON[expnConsts.expnResponse_expnCode_attrName] = responseHTML.find('.expn-code').html();
