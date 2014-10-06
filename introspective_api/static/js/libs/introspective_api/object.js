@@ -1319,6 +1319,16 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return null
         },
         
+        __replaceWith: function(resource){
+            if (resource && resource !== this) {
+                this.__trigger('replaced', [resource]);
+                // this is ugly, but right now i need this in a framework, that seems to have no chance
+                // to catch the event for one use case..
+                this._replaced_with = resource; 
+            }// todo: if resource === null: blank
+            return this
+        },
+        
         __trigger: function (event_name, args) {
             var event = new ApiObjectEvent(event_name);
             var event_args = new Array();
@@ -1387,6 +1397,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this.__hasUnsavedChanges.apply(this, arguments);
         },
         
+        replaceWith: function(){
+            return this.__replaceWith.apply(this, arguments)
+        },
+
         all: function(){
             return this.__all.apply(this, arguments)
         },
