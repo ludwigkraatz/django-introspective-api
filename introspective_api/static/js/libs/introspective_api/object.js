@@ -264,6 +264,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 asClone = settings.asClone,
                 initialContent = settings.initialContent;
             this.__is_blank = settings.isBlank || false;
+            this.__log = settings.log || null;
             this.__event_handler = {};
             this.__reset_obj(initialContent);
             
