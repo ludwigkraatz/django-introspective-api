@@ -936,11 +936,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 var callbacks = {};
                 callbacks.done = function(response, status, jqXHR){
                     result.registerSuccess(response, status, jqXHR);
-                    settings.callback(result);
+                    if (settings.callback)settings.callback(result);
                 }
                 callbacks.fail = function(jqXHR, statusText, errorThrown){
                     result.registerSuccess(jqXHR, statusText, errorThrown);
-                    settings.callback(result);
+                    if (settings.callback)settings.callback(result);
                 }
                 
                 this.__apiClient.registerCallbacksForRequest(this.__initializing, callbacks);
