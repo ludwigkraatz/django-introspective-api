@@ -876,6 +876,12 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         },
         
         
+        blank: function(settings){ // TODO: make this an own BlankApiObject or similar..
+            settings['apiClient'] = this;
+            settings['isBlank'] = true;
+            var obj = new ApiObject(settings);
+            return obj.__onGet()
+        },
         get: function(target, callback){            
             var obj = new ApiObject({apiClient:this, target:target});
             return obj.__onGet()
