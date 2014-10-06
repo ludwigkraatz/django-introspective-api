@@ -76,7 +76,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     
     $.extend(ApiResult.prototype, {
         
-        init: function(obj, raw){
+        init: function(obj, raw, action){
             this.raw = raw || false;
             this.results= [];
             this.obj= obj;
@@ -86,6 +86,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.ajaxID= null;
             this.response = undefined;
             this.responseText = undefined;
+            this.action = action;
+            this.jqXHR = undefined;
         },
         
         registerRequest: function(ajaxID, request){
@@ -108,13 +110,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }{
                 this.responseText = jqXHR.responseText;
             }
-            
+            this.jqXHR = jqXHR;
             this.setStatus('ok', status, true);
         },
         
         registerFailure: function(jqXHR, status, error){
-            this.setStatus('failed', error, false);
             this.responseText = jqXHR.responseText;
+            this.jqXHR = jqXHR;
+            this.setStatus('failed', error, false);
         },
         
         wasCached: function(responseText){
