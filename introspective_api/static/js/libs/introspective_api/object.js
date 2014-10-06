@@ -264,6 +264,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 asClone = settings.asClone,
                 initialContent = settings.initialContent;
             this.__is_blank = settings.isBlank || false;
+            this.__event_handler = {};
             this.__reset_obj(initialContent);
             
             if (target == null) {
@@ -1265,6 +1266,54 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return null
         },
         
+        __trigger: function (event_name, args) {
+            var event = new ApiObjectEvent(event_name);
+            var event_args = new Array();
+
+            event_args.push(event);
+            for (var arg in args) {
+                event_args.push(args[arg]);
+            }
+            if (this.__event_handler.hasOwnProperty(event_name)) {
+                for (var i = 0; i < this.__event_handler[event_name].length; ++i) {
+                   try {
+                       this.__event_handler[event_name][i].apply(null, event_args);
+                   } catch (e) {
+                       _log(this.__log, 'error', ['could not execute event "'+ event_name +'"', event, 'callback:', this.__event_handler[event_name][i], 'got error:', e])
+                   }
+                }
+            }
+        },
+        
+        __bind: function (event, callback) {
+            var $this = this;
+            if (event.slice(-1) == '*') {
+                var event_prefix = event.slice(0,event.length-1),
+                    prefix_length = event_prefix.length;
+                if (apiObjectEvents.hasOwnProperty(event_prefix)) {
+                    this.__bind(event_prefix, callback);
+                    function onChildren(container, __event) {
+                        for (var _event in container[__event]){
+                            $this.__bind(_event, callback);
+                            onChildren(container[__event], _event);
+                        }
+                    }
+                    onChildren(apiObjectEvents, event_prefix)
+                }else{
+                    for (var _event in apiObjectEvents) {
+                        if (event_prefix == _event.slice(0, prefix_length)) {
+                           this.__bind(_event, callback)
+                        }
+                    }
+                }
+            }else{
+                if (!this.__event_handler.hasOwnProperty(event)) {
+                    this.__event_handler[event] = [];
+                }
+                this.__event_handler[event].push(callback);
+            }
+        },
+        
         __reset: function(){
             // TODO: reset uncommitted changes
             // this.__checkContent()
@@ -1275,6 +1324,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         reset: function(){
             return this.__reset.apply(this, arguments)
+        },
+        
+        bind: function(){
+            return this.__bind.apply(this, arguments)
         },
         
         hasUnsavedChanges: function(){
