@@ -263,6 +263,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 data = settings.data,
                 asClone = settings.asClone,
                 initialContent = settings.initialContent;
+            this.__is_blank = settings.isBlank || false;
             this.__reset_obj(initialContent);
             
             if (target == null) {
@@ -272,11 +273,13 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__apiClient  = apiClient;
             if (asClone) {
                 this.__path       = parent.__path;
-            }else{
+            }else if (target){
                 this.__path       = new Path(parent ? parent.__path : null, target, data);
-            }            
-            
-            this.__updateURILinks();
+            }
+
+            if (this.__path) {
+                this.__updateURILinks();
+            }
         },
         
         __updateURILinks: function(){
@@ -384,6 +387,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __isCreated: function(){// todo
             return this.__sync.length > 0 && this.__data;
+        },
+        
+        __isBlank: function(){// todo
+            return this.__is_blank;
         },
         
         __new: function(settings){
