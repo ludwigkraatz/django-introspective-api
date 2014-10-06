@@ -48,8 +48,8 @@ class ApiEndpointMixin(object):
         """
         @brief the absolute name of this *view*. This includes all namespaces this view is within.
         """
-        if self.namespace:# TODO: self.namespace replace with get_complete_namespace()
-            return '%s.%s' % self.namespace, self.name
+        if self.namespace:
+            return '%s.%s' % (self.get_complete_namespace(), self.name)
 
         return self.name
 
