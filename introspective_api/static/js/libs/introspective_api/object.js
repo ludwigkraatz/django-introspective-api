@@ -226,7 +226,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     
     $.extend(ApiObject.prototype, {   
         
-        __reset:  function(initialContent){
+        __reset_obj:  function(initialContent){
             if (initialContent === undefined) {
                 initialContent = {}
             }
@@ -263,7 +263,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 data = settings.data,
                 asClone = settings.asClone,
                 initialContent = settings.initialContent;
-            this.__reset(initialContent);
+            this.__reset_obj(initialContent);
             
             if (target == null) {
                 this.__data       = data;
@@ -1258,6 +1258,18 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return null
         },
         
+        __reset: function(){
+            // TODO: reset uncommitted changes
+            // this.__checkContent()
+            // for target in this.uncommitted
+            // content[format][target] = syncedContent[format][target]
+            // delete this.uncommitted
+        },
+        
+        reset: function(){
+            return this.__reset.apply(this, arguments)
+        },
+        
         hasUnsavedChanges: function(){
             return this.__hasUnsavedChanges.apply(this, arguments);
         },
@@ -1486,7 +1498,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     $.extend(LinkedResource.prototype, ApiObject.prototype);
     /*$.extend(LinkedResource.prototype, {
         __init: function(apiClient, parent, target, data){
-            this.__reset();
+            this.__reset_obj();
             
             this.__apiClient  = apiClient;
             this.__parent     = parent;
