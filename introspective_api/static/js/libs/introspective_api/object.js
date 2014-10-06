@@ -1354,7 +1354,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 parent = settings.parent,
                 target = settings.target,
                 data = settings.target;
-            this.__reset(settings.initialContent);
+            this.__reset_obj(settings.initialContent);
             this.__apiClient  = apiClient;
             this.__data       = data;
             this.__parent     = parent;
@@ -1418,7 +1418,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
          
         __updateContent: function(content){
-            this.__content = content;
+            this.__content['json'] = content;
         },
         
         __update: function(newContent){
