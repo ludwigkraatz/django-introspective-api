@@ -138,8 +138,9 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             this.default_headers['Accept-Language'] = languageCode;
         },
         
-        signRequest: function(request, auth){
+        signRequest: function(request, ajax_settings){
             // Generate Authorization request header
+            var auth = ajax_settings.auth;
             var data = {};
             var payload = {};
             //delete settings.data;
@@ -253,9 +254,15 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             
             ajax.url = this.getProtocol(ajax_settings) + ajax.url.replace('//', '/');
             
-            // signing the request
-            ajax_settings.auth._needsAuthentication = true;
-            ajax = this.signRequest(ajax, ajax_settings.auth);
+            // signing the request if accessId available
+            if (ajax_settings.auth.accessId) {
+                ajax_settings.auth._needsAuthentication = true;
+                ajax = this.signRequest(ajax, ajax_settings);
+            }else if (['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && (ajax.dataType == 'json' || ajax.data instanceof Object)) {
+                ajax.data = JSON.stringify(ajax.data);
+                ajax.contentType = 'application/json; charset=utf-8';
+                delete ajax.dataType;
+            }
         
             
             if (this.debug_level > 0)
