@@ -1063,6 +1063,12 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return $this
         },
         
+        __replaceContent: function(content, dataType, uncommitted, settings){
+            settings = settings || {};
+            settings.replace = true;
+            this.__updateContent(content, dataType, uncommitted, settings);
+        },
+        
         __updateContent: function(content, dataType, uncommitted, settings){
             if (uncommitted === undefined) {
                 uncommitted = true;
@@ -1412,9 +1418,13 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         //    return this.__update.apply(this, arguments)
         //},
         
-        //updateContent: function(){
-        //    return this.__updateContent.apply(this, arguments)
-        //},
+        replaceContent: function(new_content, dataType, uncommitted){
+            return this.__replaceContent(new_content, dataType || 'json', uncommitted)
+        },
+        
+        updateContent: function(content, dataType, uncommitted){
+            return this.__updateContent(content, dataType || 'json', uncommitted)
+        },
         
         prepare: function(){
             return this.__prepare.apply(this, arguments)
