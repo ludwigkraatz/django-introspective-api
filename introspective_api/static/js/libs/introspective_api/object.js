@@ -1085,7 +1085,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 }
                 throw Error('response had invalid dataType (' + dataType + '). Need ' + formatID) // todo
             }
-                        
+            if (settings.replace) {
+                if (format == 'json') {
+                    for (var target in this.__content[format]){
+                        if (!content.hasOwnProperty(target)) {
+                            this.__update(target, undefined, uncommitted)
+                        }
+                    }
+                    if (!uncommitted) { // do it again for synced content TODO: really?
+                        for (var target in this.__syncedContent[format]){
+                            if (!content.hasOwnProperty(target)) {
+                                this.__update(target, undefined, false)
+                            }
+                        }
+                    }
+                    
+                }
+            }
             if (dataType.indexOf('json') != -1) {
                 $.extend(this.__content['json'], content);
                 
