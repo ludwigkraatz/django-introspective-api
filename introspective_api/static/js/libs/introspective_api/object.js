@@ -1017,6 +1017,52 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return $this
         },
         
+        __delete: function(callbackOrSettings){
+            var $this = this;
+            var settings = {};
+            if (this.__isCreated() != true) {
+                throw Error('not created yet') // TODO
+            }
+            if (callbackOrSettings instanceof Function) {
+                settings.callback = callbackOrSettings;
+            }else if (callbackOrSettings instanceof Object){
+                $.extend(settings, callbackOrSettings);
+            }
+            
+            var result = this.__asResult('delete', settings);
+            
+            
+            $this.__startLoading(result);
+            var request = {
+                type: 'delete',
+                done: function (response, text, jqXHR) {                             
+                    $this.__finishedLoading(result);
+                    result.registerSuccess(response, text, jqXHR);
+                    $this = $this.__updateFromResponse(response, result, settings); 
+                    if (settings.callback instanceof Function) {
+                        settings.callback(result);      
+                    }   
+                    $this.__trigger('post-delete', [result]);
+                    $this.__reset_obj();
+                },
+                fail: function (jqXHR, statuText, errorThrown) {                
+                    $this.__finishedLoading(result);
+                    result.registerFailure(jqXHR, statuText, errorThrown);
+                    if (settings.callback instanceof Function) {
+                        settings.callback(result);      
+                    }
+                    $this.__trigger('post-delete', [result]);
+                },
+                isApiInternal: true
+            };
+            $this.__setURL(request);
+            var requestSettings = {log: settings.log || this.__log};
+            var ajaxID = $this.__apiClient.add(request, requestSettings);
+            $this.__sync.push(ajaxID);
+            result.registerRequest(ajaxID, request);
+            return $this
+        },
+        
         __updateContent: function(content, dataType, uncommitted, settings){
             if (uncommitted === undefined) {
                 uncommitted = true;
@@ -1352,6 +1398,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         create: function(){
             return this.__create.apply(this, arguments)
+        },
+        
+        destroy: function(){
+            return this.__delete.apply(this, arguments)
         },
         
         save: function(){
