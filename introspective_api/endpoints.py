@@ -34,7 +34,7 @@ class ApiEndpointMixin(object):
         paren_namespace = self.parent.get_complete_namespace() if self.parent else None
 
         if bool(paren_namespace) and bool(namespace):
-            namespace  = '.'.join(paren_namespace, namespace)
+            namespace  = '.'.join([paren_namespace, namespace])
         else:
             namespace  = paren_namespace or namespace
 
