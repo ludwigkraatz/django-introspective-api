@@ -136,6 +136,8 @@ class APIView(APIView):
         else:
             headers['Link'] += '<{url}>; rel="{rel}"; title="{name}"'.format(url=url, name=name, rel=rel or 'related')
 
+class EndpointView(APIView):
+    pass
 
 class RedirectView(APIView, RedirectView):
     origin_view = None
