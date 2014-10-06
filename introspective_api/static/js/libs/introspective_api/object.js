@@ -424,8 +424,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
             
             this.__setURL(request);
-            
-            var ajaxID = this.__apiClient.add(request);            
+            var requestSettings = {log: this.__log};
+            this.__startLoading(result);
+            var ajaxID = this.__apiClient.add(request, requestSettings);            
             obj.__sync.push(ajaxID);
             result.registerRequest(ajaxID, request);
             return obj
@@ -592,7 +593,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     isApiInternal: true
                 }
                 $this.__setURL(request);
-                sync_obj = apiClient.add_urgent(request)
+                var requestSettings = {log: this.__log};
+                sync_obj = apiClient.add_urgent(request, requestSettings)
                 result.registerRequest(sync_obj, request);
                 
                 var number = $this.__sync.push(sync_obj);
@@ -910,7 +912,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         // doto: ass query args
                     }
                 }
-                var ajaxID = $this.__apiClient.add(request);
+                var requestSettings = {log: settings.log || this.__log};
+                var ajaxID = $this.__apiClient.add(request, requestSettings);
                 if ($this.__discovering === undefined) {
                     $this.__discovering = ajaxID;
                 };          
@@ -1007,7 +1010,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     // doto: ass query args
                 }
             }
-            var ajaxID = $this.__apiClient.add(request);
+            var requestSettings = {log: settings.log || this.__log};
+            var ajaxID = $this.__apiClient.add(request, requestSettings);
             $this.__sync.push(ajaxID);
             result.registerRequest(ajaxID, request);
             if ($this.__initializing === undefined) {
@@ -1077,6 +1081,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 settings = {};
             }
             
+            var log = settings.log || this.__log;
             var formatID = this.__parseFormat(settings.format);
             var format = formatID.split('|')[0]
             if (format && dataType.indexOf(format) == -1) {
@@ -1107,7 +1112,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 
                 if (content instanceof Array) {
                     for (var entry in content) {
-                        var obj = new ApiObject({apiClient: this.__apiClient, parent: this, target: null, data: content[entry], asClone:true});
+                        var obj = new ApiObject({apiClient: this.__apiClient, parent: this, target: null, data: content[entry], asClone:true, log:log});
                         obj.__updateContent(content[entry], dataType, uncommitted, settings);
                         obj.__initialized = true;
                         var id = obj.__getID();
@@ -1291,6 +1296,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     try{
                         $this.__save();
                     }catch (e){
+                        _log(log, 'error', ['failed saving', e]);
                         console.error(e.stack)
                     }
                     return false;
