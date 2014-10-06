@@ -16,6 +16,12 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     function parseLinkTemplateHeader(header) {
         return {}
     };
+    function isEmpty(obj){
+        for (var key in obj) {
+            return false
+        }
+        return true
+    }
         
     function ApiResult() {
         this.init.apply(this, arguments);
