@@ -1,5 +1,5 @@
 
-define(["jquery", "introspective-api-client"], function($, IntrospectiveApiClient){
+define(["jquery", "introspective-api-client", "introspective-api-log"], function($, IntrospectiveApiClient, _log){
     function ApiEndpoint() {
         this.init.apply(this, arguments); 
     }
@@ -24,7 +24,8 @@ define(["jquery", "introspective-api-client"], function($, IntrospectiveApiClien
         xhrFailHandlerMap: {},
         
         init: function(settings){
-            console.log('(init)', '[Introspective ApiEndpoint]', 'settings:', settings)
+            this.__log = settings.log;
+            _log(this.__log, 'debug', ['(init)', '[Introspective ApiEndpoint]', 'settings:', settings]);
             var $this = this;
             
             this.config = settings;
@@ -242,7 +243,8 @@ define(["jquery", "introspective-api-client"], function($, IntrospectiveApiClien
         },
         
         setCredentials: function(accessId, accessSecret, accessAlgorithm) {
-                throw Error("not implemented")
+            _log(this.__log, 'error', ['not implemented']);
+            throw Error("not implemented")
                 
         },
         
@@ -269,6 +271,7 @@ define(["jquery", "introspective-api-client"], function($, IntrospectiveApiClien
                     }
                 });
             }else{
+                _log(settings.log || this.__log, 'error', ['not known login method']);
                 throw Error('not known login method')
             }
         }

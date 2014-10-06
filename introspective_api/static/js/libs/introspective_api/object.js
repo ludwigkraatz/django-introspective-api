@@ -1,4 +1,4 @@
-define(['jquery'], function ($) {
+define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     
     function unpackURL(url, data) {        
         if (url.indexOf('{') != -1){
@@ -655,7 +655,8 @@ define(['jquery'], function ($) {
                     };                                 
                     return $this.__objects[targetID].__onGet(wrapped, format);
                 
-                }else{console.log(targetID);
+                }else{
+                    _log(log, 'error', ['target "'+ target +'" not found', targetID]);
                     throw Error('target "'+ target +'" not found');
                 }   
             }else{

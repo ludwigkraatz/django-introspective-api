@@ -1,4 +1,4 @@
-define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiObject, JSON2) {    
+define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', 'hawk'], function ($, ApiObject, _log, JSON2) {
     function ApiClient() {
         this.init.apply(this, arguments);
     };
@@ -61,7 +61,7 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
                     'callback': function(context){
                         if (!apiClient.locked) {
                             if (apiClient.debug_level > 0) {
-                                console.log('locked, because not authenticated');
+                                _log(context.log, 'debug', ['locked, because not authenticated']);
                             }
                             apiClient.lock();
                             $this.refreshCredentials({
@@ -78,7 +78,7 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
                     'callback': function(context){
                         if (!apiClient.locked) {
                             if (apiClient.debug_level > 0) {
-                                console.log('locked, because not authenticated');
+                                _log(context.log, 'debug', ['locked, because not authenticated']);
                             }
                             apiClient.lock();
                             $this.refreshCredentials({
@@ -186,6 +186,7 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
                 request.headers.Authorization = result.field;
                 auth.artifacts = result.artifacts;
             }else if (options.credentials.id && options.credentials.key && options.credentials.algorithm){
+                _log(ajax_settings.log || this__log, 'error', ['error encrypting']);
                 throw Error, 'error encrpyting' //todo make global error handler catch this
             }
             
@@ -258,7 +259,7 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
         
             
             if (this.debug_level > 0)
-                console.log('(info)', '[Introspective ApiClient]', 'request:', ajax);
+                _log(ajax_settings.log || this.__log, 'debug', ['(info)', '[Introspective ApiClient]', 'request:', ajax]);
             var jqxhr = this.ajax(ajax);
             
                 jqxhr.done(function(response, status, xhr){
@@ -272,6 +273,7 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
         
         registerCallbacksForRequest: function(id, callbacks){
             if (this.queue[id] === undefined) {
+                _log(this.__log, 'error', ['id "'+id+'" not found in queue']);
                 throw Error('id "'+id+'" not found in queue')
             }
             if (this.queue[id]['callbacks'] === undefined) {
@@ -299,7 +301,6 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
     
     
         init: function(settings){
-            console.log('(init)', '[Introspective ApiClient]', 'settings:', settings)
             var tmp = settings.endpoint.split('://');
             if (tmp.length == 1) {
                 tmp = tmp[0];
@@ -316,7 +317,8 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
                 this.host = tmp2[0];
                 delete tmp2[0];
             }
-            console.log('(info)', '[Introspective ApiClient]', 'host:', this.host)
+            this.__log = settings.log;
+            _log(this.__log, 'debug', ['(init)', '[Introspective ApiClient]', 'settings:', settings, 'host:', this.host]);
             this.endpoint = tmp2.join('/');
             this.crossDomain = settings.crossDomain;
             
@@ -457,8 +459,10 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
                                         )) {
                 this.start(id);
             }else{
-                if (!this.priotirized_requests[priority])
+                if (!this.priotirized_requests[priority]){
+                    _log(settings.log || this.__log, 'error', [priority, 'is not a valid priority']);
                     throw new Error(str(priority) + 'is not a valid priority')
+                }
                 this.priotirized_requests[priority].push(id)
                 
                 if (this.active<this.at_once){
@@ -810,6 +814,7 @@ define(['jquery', 'introspective-api-object', 'json', 'hawk'], function ($, ApiO
             }
             var $this = this;
             if (this.endpoint == null) {
+                _log(settings.log, 'error', ['refreshing credentials needs the endpoint to be set']);
                 throw Error("Refreshing Credentials needs the endpoint to be set")
             }
             
