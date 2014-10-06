@@ -455,6 +455,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
         },
         
+        __checkContent: function(){
+            for (var target in this.__content['json']) {
+                if (JSON.stringify(this.__syncedContent['json'][target]) !== JSON.stringify(this.__content['json'][target])) {
+                    this.__update(target, this.__content['json'][target]);
+                }
+            }
+            if (this.__uncommitted.length === 0 && this.__syncedContent['json'].length == this.__content['json'].length) {
+                return
+            }
+            for (var target in this.__syncedContent['json']) {
+                if (!this.__content['json'].hasOwnProperty(target) && !this.__uncommitted.hasOwnProperty(target)) {
+                    this.__update(target, null);
+                }
+            }
+        },
+        
+        
         __save: function(callback){    
             var $this = this;            
             var apiClient = $this.__apiClient;
