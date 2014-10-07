@@ -263,8 +263,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 data = settings.data,
                 asClone = settings.asClone,
                 initialContent = settings.initialContent;
+            
+            this.setLog(settings.log || null);
             this.__is_blank = settings.isBlank || false;
-            this.__log = settings.log || null;
             this.__event_handler = {};
             this.__reset_obj(initialContent);
             
@@ -1577,6 +1578,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 }
                 this.__event_handler[event].push(callback);
             }
+        },
+        
+        setLog: function(log){
+            this.__log = log;
         },
         
         __reset: function(){
