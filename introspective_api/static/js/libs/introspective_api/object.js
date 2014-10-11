@@ -1646,6 +1646,22 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this.__delete.apply(this, arguments)
         },
         
+        needsSave: function(target){
+            this.__checkContent(target);
+            if (target) {
+                if (this.__uncommitted.hasOwnProperty(target)) {
+                    return true
+                }
+            }else{
+                for (var x in this.__uncommitted) {
+                    if (this.__uncommitted.hasOwnProperty(x)) {
+                        return true
+                    }
+                }
+            }
+            return false
+        },
+        
         save: function(){
             return this.__save.apply(this, arguments)
         },
