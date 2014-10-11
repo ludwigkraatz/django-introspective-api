@@ -1069,7 +1069,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }else if (!settings.format && this.__initialized && (settings.forceReload === undefined || settings.forceReload === false)) {
                 var result = this.__asResult('load', settings);
                 result.wasCached();
-                settings.callback(result);
+                if (settings.callback) settings.callback(result);
                 $this.__trigger('post-load-from-cache', [result]);
             }else{
                 settings.returnResult = true;
