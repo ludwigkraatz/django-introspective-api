@@ -463,8 +463,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
         },
         
-        __checkContent: function(){
+        __checkContent: function(_target){
             for (var target in this.__content['json']) {
+                if (_target && _target !== target) {
+                    continue
+                }
                 if (JSON.stringify(this.__syncedContent['json'][target]) !== JSON.stringify(this.__content['json'][target])) {
                     this.__update(target, this.__content['json'][target]);
                 }
@@ -473,6 +476,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 return
             }
             for (var target in this.__syncedContent['json']) {
+                if (_target && _target !== target) {
+                    continue
+                }
                 if (!this.__content['json'].hasOwnProperty(target) && !this.__uncommitted.hasOwnProperty(target)) {
                     this.__update(target, null);
                 }
