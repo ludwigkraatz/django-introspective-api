@@ -15,21 +15,19 @@ class ApiResponse(Response):
     """
 
     def __init__(self, *args, **kwargs):
-        """
-        Alters the init arguments slightly.
-        For example, drop 'template_name', and instead use 'data'.
-
-        Setting 'renderer' and 'media_type' will typically be deferred,
-        For example being set automatically by the `APIView`.
-        """
         
         self._code = kwargs.pop('code', None)
         
         super(ApiResponse, self).__init__(*args, **kwargs)
-        
         if self._code:
+            self.reason_phrase = self.status_text
             self.data = DictWithApiCode(self.data, self._code)
 
     def finalize_for(self, request):
         return APIView().finalize_response(request, self) # TODO: ugly
-    
+
+    @property
+    def status_text(self, ):
+        if self._code:
+            return self._code
+        return super(ApiResponse, self).status_text
