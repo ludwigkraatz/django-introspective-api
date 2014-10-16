@@ -21,7 +21,7 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
         config: null,
         authEndpointHost: null,
         
-        xhrFailHandlerMap: {},
+        xhrHandlerMap: {},
         
         init: function(settings){
             this.__log = settings.log;
@@ -237,7 +237,7 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
                 crossDomain: settings.crossDomain
             });
             
-            this.ajax.registerExternalFailHandlers(this, this.xhrFailHandlerMap);
+            this.ajax.registerExternalHandlers(this, this.xhrHandlerMap);
             this.ajax.initialize(settings.callback);
             
         },
@@ -248,18 +248,27 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
                 
         },
         
+        refreshCredentials: function(callback){
+            this.ajax.refreshCredentials({
+                expectsResult: false, // TODO: returns false not immediately, but after user was logged in
+                callback: callback ? function(result){
+                    callback(result)
+                } : undefined
+            })
+        },
+        
         getAuthStatus: function(callback){
             this.ajax.refreshCredentials({
                 expectsResult: true,
-                callback: function(result){
+                callback: callback ? function(result){
                     callback(result)
-                }
+                } : undefined
             })
         },
         
         login: function(settings, callback){
             if (settings.auth === 'credentials') {
-                this.ajax.login(settings.username, settings.password, function(result){
+                return this.ajax.login(settings.username, settings.password, function(result){
                     if (result.auth === true) {
                         return callback({
                             isAuthenticated: true,
