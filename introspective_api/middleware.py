@@ -134,17 +134,17 @@ class HAWK_Authentication(object):
                     return get_InvalidKeyException_Response(request, e)
             
             # TODO: if DEBUG
-            elif request.META["HTTP_AUTHORIZATION"].startswith('TEST '):
-                from django.conf import settings
-                if not settings.DEBUG:
-                    return get_HawkMissing_Response(request, "auth-saml")#todo
-                
-                api_user_id = "test"
-                
-                api_user    =   get_access_key_model().objects.get(
-                        id = api_user_id
-                        )
-                request.api_user = api_user
+            #elif request.META["HTTP_AUTHORIZATION"].startswith('TEST '):
+            #    from django.conf import settings
+            #    if not settings.DEBUG:
+            #        return get_HawkMissing_Response(request, "auth-saml")#todo
+            #    
+            #    api_user_id = "test"
+            #    
+            #    api_user    =   get_access_key_model().objects.get(
+            #            id = api_user_id
+            #            )
+            #    request.api_user = api_user
         else:
             if not (hasattr(request, 'user') and request.user.is_authenticated()):
                 if request.path.startswith("/api/"):
