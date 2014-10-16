@@ -41,13 +41,18 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         accessId: null,
         accessSecret: null,
         accessAlgorithm: null,
-        
-        _registeredSuccessHandlers:{
-            
-        },
-        _registeredFailHandlers: {
+
+        _registeredHandlers: {
+            201:{
+                'CREATED': {
+                    'obj': null,
+                    'callback': function(context){
+                        return context.methodMap.proceedSuccess()
+                    }
+                },
+            },
             503:{
-                'incomplete': {
+                'INCOMPLETE': {
                     'obj': null,
                     'callback': function(context){
                         retryAfter = jqXHR.getResponseHeader('Retry-After');
@@ -56,15 +61,15 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 },
             },
             401:{
-                'auth expired': {
+                'AUTHENTICATION EXPIRED': {
                     'obj': null,
                     'callback': function(context){
-                        if (!apiClient.locked) {
-                            if (apiClient.debug_level > 0) {
+                        if (!context.apiClient.locked) {
+                            if (context.apiClient.debug_level > 0) {
                                 _log(context.log, 'debug', ['locked, because not authenticated']);
                             }
-                            apiClient.lock();
-                            $this.refreshCredentials({
+                            context.apiClient.lock();
+                            context.apiClient.refreshCredentials({
                                 callback: context.methodMap.processInteraction,
                                 expectsResult: true,
                                 forceRefresh: true
@@ -73,19 +78,19 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                         return context.methodMap.deferRequest();
                     }
                 },
-                'auth missing': {
+                'AUTHENTICATION MISSING': {
                     'obj': null,
                     'callback': function(context){
-                        if (!apiClient.locked) {
-                            if (apiClient.debug_level > 0) {
+                        if (!context.apiClient.locked) {
+                            if (context.apiClient.debug_level > 0) {
                                 _log(context.log, 'debug', ['locked, because not authenticated']);
                             }
-                            apiClient.lock();
-                            $this.refreshCredentials({
+                            context.apiClient.lock();
+                            /*context.apiClient.refreshCredentials({
                                 callback: context.methodMap.processInteraction,
                                 expectsResult: true,
                                 forceRefresh: true
-                            });
+                            });*/
                         }
                         return context.methodMap.deferRequest();
                     }
@@ -145,6 +150,8 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             var data = {};
             var payload = {};
             //delete settings.data;
+            _log(ajax_settings.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiClient)', '(resquest)', 'signing', request, 'with', ajax_settings])
+                
             
             var data_values = new Array();
             
@@ -197,9 +204,11 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         },
         
         
-        checkResponse: function(xhr, auth, response){
+        checkResponse: function(xhr, settings, response){
             
             // Check Server Response
+            var log = settings.log,
+                auth = settings.auth;
             var artifacts = auth.artifacts;
             delete auth.artifacts;
             var credentials= auth.auth_callback ? auth.auth_callback() : {
@@ -210,7 +219,11 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             var options = {
                 payload: xhr.responseText ? xhr.responseText : ""
                 };
-                
+            
+            if (this.debug_level > 0){
+                // TODO: don't log accessSecret
+                _log(log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiClient)', '(Response)', 'authenticating XHR:', xhr, 'with settings:', settings, 'options:', options, 'and response:', response])
+            }
             return hawk.client.authenticate(
                 xhr, credentials, artifacts, options
                 );
@@ -256,7 +269,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             ajax.url = this.getProtocol(ajax_settings) + ajax.url.replace('//', '/');
             
             // signing the request if accessId available
-            if (ajax_settings.auth.accessId) {
+            if (ajax_settings.auth.accessId) { // TODO: set ajax_settings.auth after this.__locked might be set to true (after authentication)
                 ajax_settings.auth._needsAuthentication = true;
                 ajax = this.signRequest(ajax, ajax_settings);
             }else if (['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && (ajax.dataType == 'json' || ajax.data instanceof Object)) {
@@ -267,12 +280,15 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         
             
             if (this.debug_level > 0)
-                _log(ajax_settings.log || this.__log, 'debug', ['(info)', '[Introspective ApiClient]', 'request:', ajax]);
+                // TODO: don't log accessSecret
+                _log(ajax_settings.log || this.__log, 'debug', ['(info)', '[Introspective ApiClient]', 'request:', ajax, 'with settings', ajax_settings]);
             var jqxhr = this.ajax(ajax);
             
+            if (ajax_settings.auth._needsAuthentication) {
                 jqxhr.done(function(response, status, xhr){
-                    ajax_settings.auth._isAuthenticatedResponse = $this.checkResponse(xhr, ajax_settings.auth, response);
-                })       
+                    ajax_settings.auth._isAuthenticatedResponse = $this.checkResponse(xhr, ajax_settings, response);
+                }) 
+            }
             
             jqxhr.url = url;
             
@@ -473,7 +489,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 }
                 this.priotirized_requests[priority].push(id)
                 
-                if (this.active<this.at_once){
+                if (this.active<this.at_once && this.locked == false){ // TODO: as complete callback of active requests
                     var $this = this;
                     setTimeout(function (){$this.next()}, 10);
                 }
@@ -491,6 +507,8 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                     cur = this.priotirized_requests[i][this.priotirized_requests[i].length-1]
                     if (this.locked == false || this.queue[cur].settings.ignoreLock) {
                         this.start(this.priotirized_requests[i].pop())
+                    }else{
+                        break; // TODO: find a better way. now ignoreLock requests get missed, because they might not be the latest request
                     }
                 }
                 if (this.priotirized_requests[i].length>0)
@@ -560,10 +578,13 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             
             this.queue[id]["jqXHR"]=$ajax;
             
-            $ajax.then(
+            /*$ajax.then(
                 this._get_done_handler(id),
                 this._get_fail_handler(id)
-            )
+            )*/
+            //$ajax.success(this._get_done_handler(id));
+            //$ajax.error(this._get_fail_handler(id));
+            $ajax.always(this._get_handler(id));
             
             return $ajax
         },
@@ -626,7 +647,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             }            
         },
         
-        _getSuccessCallbackHandler: function(id) {
+        _getSuccessCallbackHandler: function(id, methodMap) {
             var apiClient = this;
             return function (response, statusText, jqXHR){
                 if (apiClient.queue[id].settings.auth._needsAuthentication != true ||
@@ -652,7 +673,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                     return apiClient._complete(id);
                     
                 }else{                
-                    
+                    _log(apiClient.queue[id].settings.log || this.__log, 'error', ['(IntrospectiveApi)', '(Response)', 'response not valid'])
                     return methodMap.proceedFailure(jqXHR, "Response not valid", 0);
                     
                 }            
@@ -660,7 +681,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             }
         },
         
-        registerExternalFailHandlers: function(obj, handlerMap){
+        registerExternalHandlers: function(obj, handlerMap){
             var newHandlers = {};
             for (var status in handlerMap) {
                 if (status == '*') {
@@ -682,121 +703,74 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 }
 
             }
-            $.extend(this._registeredFailHandlers, newHandlers);
+            $.extend(this._registeredHandlers, newHandlers);
         },
         
-        registerExternalSuccessHandlers: function(obj, handlerMap){
-            var newHandlers = {};
-            for (var status in handlerMap) {
-                if (status == '*') {
-                    newHandlers[status] = {
-                        obj: obj,
-                        callback: handlerMap[status]
-                    }
-                }else{
-                    for (var statusText in handlerMap[status]) {
-                        if (newHandlers[status] == undefined) {
-                            newHandlers[status] = {};
-                        }
-                        
-                        newHandlers[status][statusText] = {
-                            obj: obj,
-                            callback: handlerMap[status][statusText]
-                        }
-                    }   
-                }
+        _get_handler: function(id){
+            var apiClient = this;
+            
+            var methodMap = {};
+            
+            methodMap.proceedFailure = apiClient._getFailedCallbackHandler(id, methodMap),
+            methodMap.proceedSuccess = apiClient._getSuccessCallbackHandler(id, methodMap),
 
+            methodMap.processInteraction = function (result){
+                if (result === true) {
+                    apiClient.unlock();
+                    apiClient.handleDeferredRequests();
+                }else{
+                    methodMap.proceedFailure();
+                }
+            },
+                
+            methodMap.repeatRequest = function (retryAfter) {
+                setTimeout(apiClient.start, parseInt(retryAfter)*1000, id);
+            },
+                
+            methodMap.deferRequest = function(){
+                apiClient.deferredQueue.push(id);
             }
-            $.extend(this._registeredSuccessHandlers, newHandlers);
-        },
-        
-        _get_done_handler: function(id){
-            var apiClient = this;
-            var methodMap = {                
-                proceedFailure: apiClient._getFailedCallbackHandler(id),
-                proceedSuccess: apiClient._getSuccessCallbackHandler(id),
-            };
             
-            return function(response, textStatus, jqXHR){
-                var status = jqXHR.status;
-                
-                var context ={
-                    response: response,
-                    jqXHR: jqXHR,
-                    
-                    apiClient: apiClient,
-                    methodMap: methodMap,
+            return function(jqXHR_response, textStatus, error_jqXHR){
+                var jqXHR, code;
+                if (textStatus == 'success') {
+                    methodMap.proceedSuccess = methodMap.proceedSuccess.bind(apiClient, jqXHR_response, textStatus, error_jqXHR);
+                    methodMap.proceedFailure = methodMap.proceedFailure.bind(apiClient, error_jqXHR, textStatus, jqXHR_response);
+                    proceed = methodMap.proceedSuccess;
+                    jqXHR = error_jqXHR;
+                    code = '';
+                }else{
+                    methodMap.proceedSuccess = methodMap.proceedSuccess.bind(apiClient, error_jqXHR, textStatus, jqXHR_response);
+                    methodMap.proceedFailure = methodMap.proceedFailure.bind(apiClient, jqXHR_response, textStatus, error_jqXHR);
+                    proceed = methodMap.proceedFailure;
+                    jqXHR = jqXHR_response;
+                    code = error_jqXHR;
                 }
                 
-                if (apiClient._registeredSuccessHandlers[status] != undefined) {
-                    
-                    if (apiClient._registeredSuccessHandlers[status][error] != undefined){
-                        context.this = apiClient._registeredSuccessHandlers[status][error]['obj']
-                        return apiClient._registeredSuccessHandlers[status][error]['callback'](context);
-                    
-                    }else if (apiClient._registeredSuccessHandlers[status]['.'] != undefined) {
-                        context.this = apiClient._registeredSuccessHandlers[status]['.']['obj']
-                        return apiClient._registeredSuccessHandlers[status]['.']['callback'](context);
-                    
-                    }
-                }
-                
-                return methodMap.proceedSuccess(response, textStatus, jqXHR);
-            }
-        
-        },
-        
-        _get_fail_handler: function(id){
-            var apiClient = this;
-            
-            var methodMap = {
-                
-                proceedFailure: this._getFailedCallbackHandler(id),
-                    
-                processInteraction: function (result){
-                    if (result === true) {
-                        apiClient.unlock();
-                        apiClient.handleDeferredRequests();
-                    }else{
-                        proceedFailure();
-                    }
-                },
-                
-                repeatRequest: function (retryAfter) {
-                    setTimeout(apiClient.start, parseInt(retryAfter)*1000, id);
-                },
-                
-                deferRequest: function(){
-                    apiClient.deferredQueue.push(id);
-                }
-                
-            };
-            
-            return function(jqXHR, textStatus, error){
                 var status = jqXHR.status;
                 
                 var context ={
                     response: apiClient.translateResponse_toJSON(jqXHR),
                     jqXHR: jqXHR,
+                    code: code,
                     
                     apiClient: apiClient,
                     methodMap: methodMap,
                 }
                 
-                if (apiClient._registeredFailHandlers[status] != undefined) {
+                if (apiClient._registeredHandlers[status] != undefined) {
                     
-                    if (apiClient._registeredFailHandlers[status][error] != undefined){
-                        context.this = apiClient._registeredFailHandlers[status][error]['obj']
-                        return apiClient._registeredFailHandlers[status][error]['callback'](context);
+                    if (apiClient._registeredHandlers[status][code] != undefined){
+                        context.this = apiClient._registeredHandlers[status][code]['obj']
+                        return apiClient._registeredHandlers[status][code]['callback'](context);
                     
-                    }else if (apiClient._registeredFailHandlers[status]['.'] != undefined) {
-                        context.this = apiClient._registeredFailHandlers[status]['.']['obj']
-                        return apiClient._registeredFailHandlers[status]['.']['callback'](context);
+                    }else if (apiClient._registeredHandlers[status]['.'] != undefined) {
+                        context.this = apiClient._registeredHandlers[status]['.']['obj']
+                        return apiClient._registeredHandlers[status]['.']['callback'](context);
                     
                     }
                 }
-                
-                return methodMap.proceedFailure(jqXHR, textStatus, error);
+                return proceed()
             }
         },
         
@@ -816,7 +790,8 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         
         refreshCredentials: function(settings){
             var $this = this,
-                type = 'get';
+                type = 'get',
+                authData = {};
             if (! settings) {
                 settings = {};
             }
@@ -836,7 +811,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             }
             
             this.add_urgent({
-                uri: '/auth/credentials/',
+                uri: '/auth/login/',
                 type: type,
                 data: authData,
                 /*
@@ -898,7 +873,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         },
         
         login: function(username, password, callback){
-            this.refreshCredentials({
+            return this.refreshCredentials({
                 expectsResult: true,
                 sendAuth: true,
                 username: username,
