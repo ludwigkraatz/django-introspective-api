@@ -1,0 +1,11 @@
+[
+    {
+        "model": "consumers.consumer",
+        "pk": "54a5a750-5465-11e4-916c-0800200c9a66",
+        "fields": {
+          "identifier": "public",
+          "description": "public consumer",
+          "created": "2012-09-15T22:17:44Z"
+        }
+    }
+]
