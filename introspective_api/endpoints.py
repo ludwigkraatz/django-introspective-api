@@ -2,7 +2,7 @@ from django.conf.urls import url, patterns, include
 from django.core.exceptions import ImproperlyConfigured
 
 from django.views.generic import View as ViewClass
-from introspective_api.views import APIView, RedirectView
+from introspective_api.views import APIView, RedirectView, EndpointView
 from introspective_api.settings import api_settings
 
 ApiResponse = api_settings.API_RESPONSE_CLASS
@@ -336,6 +336,8 @@ class ApiEndpoint(ApiEndpointMixin):
 
 
         if not self.view:
+            if not self.view_class:
+                self.view_class = EndpointView
             if self.view_class:
                 kwargs = {}
                 kwargs['endpoint']  = self
