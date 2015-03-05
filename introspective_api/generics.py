@@ -293,7 +293,7 @@ class GenericAPIView(views.APIView):
         if not filter_kwargs:
             raise ImproperlyConfigured(
                 'Expected view %s to be called with a list of field lookups'
-                '"%s" could not be translated accordingly' %
+                '"%s" could not be translated accordingly. You migh wanna set the "parent_field" attribute of this endpoint.' %
                 (self.__class__.__name__, str(self.kwargs))
             )
 
