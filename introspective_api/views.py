@@ -3,10 +3,11 @@ from django.views.generic import RedirectView
 from rest_framework import status
 from introspective_api.settings import api_settings
 from introspective_api.fields import HyperlinkedMetaField, HyperlinkedIdentityField
-from introspective_api.response import ApiResponse
 from django.core.exceptions import ValidationError
 from functools import update_wrapper
 from django.views.decorators.csrf import csrf_exempt
+
+ApiResponse = api_settings.API_RESPONSE_CLASS
 
 class APIView(APIView):
     settings = api_settings
