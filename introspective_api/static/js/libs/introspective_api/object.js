@@ -36,6 +36,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     var apiObjectEvents = {
         
         // callback(event, apiResult)
+        'initialized': {},
         'post-save': {},
         //'post-save-related': {},
         'post-add': {},
@@ -421,6 +422,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var new_instance = this.__get(settings);//new LinkedResource({apiClient:this.__apiClient, parent:this, data:null, target:null, asClose:true, initialContent:settings.initialContent, log:log});
             //this.__trigger('accessed-clone', [new_instance])
             new_instance.__initialized = true;
+            new_instance.__trigger('initialized', [])
             new_instance.__bind('post-create', function(event, result){
                 if (result.wasSuccessfull) {
                     new_instance.__updatePath(target, result.obj.__syncedContent['json']);
@@ -1300,6 +1302,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         var obj = new ApiObject({apiClient: this.__apiClient, parent: this, target: null, data: content[entry], asClone:true, log:log});
                         obj.__updateContent(content[entry], dataType, uncommitted, settings);
                         obj.__initialized = true;
+                        obj.__trigger('initialized', []);
                         var id = obj.__getID();
                         if (id) {
                             // TODO: because introspective api requires UUID, maybe rather use a global __objects storage
@@ -1367,6 +1370,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 
 
                 $this.__initialized = true;
+                $this.__trigger('initialized', [])
                 $this.__initializing = undefined;
             }     
             if (result.request.type.toLowerCase() == 'post') {
