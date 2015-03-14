@@ -245,6 +245,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
 
             this.__data = {};
+            this.__unresolvedData = {};
             this.__links = {};
             this.__URIlinks = {};
             this.__URLlinks = {};
@@ -291,6 +292,12 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 this.__data       = data;
                 if (this.__path) {
                     this.__updateURILinks();
+                }
+                if (!target) {
+                    this.__unresolvedData = data;
+                }
+                if (url) {
+                    this.__updateURLLinks({'.': url});
                 }
             }
 
@@ -481,13 +488,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __setURL: function(request, target){
             var data = {}
-            $.extend(data, this.__data);
+            $.extend(data, this.__unresolvedData);
             if (request.data) {
                 $.extend(data, request.data);
-            }else{
-                request.data = {}
             }
-            $.extend(request.data, data);
+            request.data = data;
             
             var url = this.__asURL(target);
             if (url) {
