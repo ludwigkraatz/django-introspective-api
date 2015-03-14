@@ -192,6 +192,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     $.extend(Path.prototype, {        
         init: function(parent, target, _data){
             this.path = new Array();
+            this.links = undefined;
             if (_data instanceof Object) {  
                 var data = _data;             
             }else{
@@ -212,13 +213,21 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.path.push(this);
         },
         getURIs: function(sitemap){
+            if (this.links) {
+                return this.links
+            }
             var active = sitemap;
             var data = {}
             for (var urlPartIndex in this.path){
                 var urlPart = this.path[urlPartIndex];
                 $.extend(data, urlPart.data);
                 if (urlPart.target) {
-                    active = active[urlPart.target];
+                    new_active = active[urlPart.target];
+                    if (new_active === undefined && LINK_HEADER_TARGETS.indexOf(urlPart.target) != -1) {
+                        new_active = active[urlPart.data];
+                    }
+                    active = new_active || {};  // TODO: this is to prevent error on undefined links (new_active == undefined)
+                                                // but what should really happen if this happens? error?
                 }
                 
             };
@@ -229,6 +238,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     links[link] = unpackURL(url, data)
                 }                
             }
+            this.links = links;
             return links
         }
     });
@@ -276,7 +286,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 target = settings.target,
                 data = settings.data,
                 asClone = settings.asClone,
-                initialContent = settings.initialContent;
+                initialContent = settings.initialContent,
+                url = settings.url;
             
             this.setLog(settings.log || null);
             this.__is_blank = settings.isBlank || false;
@@ -287,7 +298,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__apiClient  = apiClient;
             this.__path       = parent ? parent.__path : null;
             if (!asClone && target){
-                this.__updatePath(target, data);
+                this.__updatePath(target, data, url);
             }else{
                 this.__data       = data;
                 if (this.__path) {
@@ -330,7 +341,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
          * depending links ONLY substitute from resource attributes */
         __updateURLLinks: function(additionalLinks){
             var $this = this;
-            var data = {}
+            var data = {};
             _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(updateURLLinks)', 'additional links', additionalLinks, this])
             for (var entry in $this.__content['json']) {
                 data[entry] = $this.__content['json'][entry];
@@ -358,7 +369,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             
         },
         
-        __asURL: function(target){
+        __asURL: function(target, data){
+            if (LINK_HEADER_TARGETS.indexOf(target) != -1 && data && data[target] && this.__URLlinks[data[target]]) {
+                return this.__URLlinks[data[target]]
+            }
             if (target && this.__URLlinks[target]) {
                 return this.__URLlinks[target]
             }
@@ -382,9 +396,16 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return null;
         },
         
-        __asURI: function(target){
+        __asURI: function(target, data){
             if (target && this.__URIlinks[target]) {
+                if (data && LINK_HEADER_TARGETS.indexOf(target) != -1 && data[target]) {
+                    return unpackURL(this.__URIlinks[target], data)
+                }
                 return this.__URIlinks[target]
+            }
+            
+            if (data && LINK_HEADER_TARGETS.indexOf(target) != -1 && data[target] && this.__URIlinks[data[target]]) {
+                return this.__URIlinks[data[target]]
             }
             
             var url = '';            
@@ -414,7 +435,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this.__is_blank;
         },
         
-        __updatePath: function(target, data){
+        __updatePath: function(target, data, url){
             if (data) {
                 if (!this.__data) {
                     this.__data = {}
@@ -424,7 +445,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__path = new Path(this.__path, target, this.__data);
             //this.__links = {};
             this.__updateURILinks();
-            var new_url = this.__asURL(target);
+            var new_url = url || this.__asURL(target);
             if (new_url){
                 this.__updateURLLinks({'.': new_url});
             }
@@ -782,7 +803,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         __fromFixture: function(fixture){
             var result = this.__asResult('fixture');
             // TODO: set responseText or what ever is needed
-            this.__updateContent(fixture, 'json', false, {format: 'json', replace: true})
+            result.responseText = fixture;
+            this.__updateContent($.extend(true, {}, fixture), 'json', false, {format: 'json', replace: true})
             this.__initialized = true;
             this.__initializing = undefined;
             this.__trigger('post-load', [result])
