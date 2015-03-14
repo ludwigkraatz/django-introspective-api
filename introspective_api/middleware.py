@@ -97,7 +97,7 @@ class HAWK_Authentication(object):
                         'method': request.method,
                         'host':request.META["HTTP_HOST"].split(":")[0],
                         'port':request.META["SERVER_PORT"],
-                        'url':request.path,
+                        'url':request.get_full_path(),
                         'contentType': request.META["CONTENT_TYPE"]
                     }
     
@@ -163,7 +163,7 @@ class HAWK_Authentication(object):
             header = hawk.Server(req = req, credentials_fn = self.get_credentials_lookup()).header(
                 artifacts   =   request.api_user.get_artifacts(),
                 options     =   {
-                    'payload': response.content,
+                    'payload': response.content if request.method != 'HEAD' else None,
                     'contentType': response['Content-Type']
                 }
                 )
