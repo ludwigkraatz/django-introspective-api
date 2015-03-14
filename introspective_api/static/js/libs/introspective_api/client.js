@@ -235,12 +235,20 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         },
         
         ajax_apiInternal: function( request, ajax_settings){
-            var $this = this;
+            var $this = this,
+                uri = true;
             var ajax = {
                 "global": false,
                 "headers": {},
-                "url": this.endpoint + request.uri,
+                "url": request.uri ? (this.endpoint + request.uri) : request.url,
             };
+            prefix = this.getProtocol(ajax_settings) + this.host + this.endpoint
+            if (ajax.url.indexOf(prefix) == 0) {
+                uri = false;
+            }else if (ajax.url.indexOf('://') != -1) {
+                throw Error('not allowed')
+            }
+            
             delete request.uri;
             
             $.extend(ajax.headers, this.default_headers);
@@ -264,9 +272,11 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             if (this.crossDomain) {
                 ajax.crossDomain = true;
             }
-            ajax.url = this.host + ajax.url;
-            
-            ajax.url = this.getProtocol(ajax_settings) + ajax.url.replace('//', '/');
+            if (uri) {
+                ajax.url = this.host + ajax.url;
+                
+                ajax.url = this.getProtocol(ajax_settings) + ajax.url.replace('//', '/');
+            }
             
             // signing the request if accessId available
             if (ajax_settings.auth.accessId) { // TODO: set ajax_settings.auth after this.__locked might be set to true (after authentication)
