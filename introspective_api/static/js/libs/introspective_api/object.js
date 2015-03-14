@@ -1984,6 +1984,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __initArray: function(arr){
+            var $this = this;
             /*
             var ArrayMixin = function(){};
             $.extend(ArrayMixin.prototype, arr.constructor.prototype);
@@ -2010,12 +2011,22 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     return own_length_method();//call the length method
                 }
             })(arr.prototype.totalLength);*/
-            arr.totalLength = 0;  // TODO: on updateFromResponse, look for x-records indicator for length
+            this.__bind('post-load', function(event, result){
+                arr.totalLength = $this.__length();
+            })
             this.__bind('post-add', function(event, obj){
                 arr.totalLength += 1;
-            })
+            });
+            this.__bind('post-remove', function(event, obj){
+                arr.totalLength -= 1;
+            });
+            arr.totalLength = $this.__length();
+            //this.__inspect();
         },
         
+        __length: function(){
+            return 0//this.__content.json.length // TODO: check in response for x-records range header
+        },
         
         __checkContent: function(_target){
             _target = _target !== undefined ? parseInt(_target) : undefined;
