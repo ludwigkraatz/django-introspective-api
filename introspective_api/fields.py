@@ -1,7 +1,7 @@
 from rest_framework.fields import *
 from rest_framework.relations import *
 from django.core.exceptions import ValidationError
-from introspective_api.reverse import reverse
+from introspective_api.reverse import reverse_nested as reverse  # TODO: implement app_name config arg
 
 from django.db.models.fields import Field as BaseDjangoField, AutoField as BaseDjangoAutoField
 import uuid
@@ -102,7 +102,7 @@ class HyperlinkedRelatedView(HyperlinkedMetaField):
                         'query_kwarg': self.pk_query_kwarg,
                         'query_value': pk
                         }
-            except:
+            except NoReverseMatch:
                 pass
     
             raise ValidationError('Could not resolve URL for field using view name "%s"' % view_name)
@@ -130,7 +130,7 @@ class HyperlinkedRelatedView(HyperlinkedMetaField):
                         'query_kwarg': self.slug_query_kwarg,
                         'query_value': slug
                         }
-            except:
+            except NoReverseMatch:
                 pass
     
             raise ValidationError('Could not resolve URL for field using view name "%s"' % view_name)
@@ -141,7 +141,7 @@ class HyperlinkedRelatedView(HyperlinkedMetaField):
             kwargs = {self.pk_url_kwarg: obj.pk}
             try:
                 return reverse(view_name, kwargs=kwargs, request=request, format=format)
-            except:
+            except NoReverseMatch:
                 pass
     
             slug = getattr(obj, self.slug_field, None)
@@ -152,13 +152,14 @@ class HyperlinkedRelatedView(HyperlinkedMetaField):
             kwargs = {self.slug_url_kwarg: slug}
             try:
                 return reverse(self.view_name, kwargs=kwargs, request=request, format=format)
-            except:
+            except NoReverseMatch:
+                raise
                 pass
     
             kwargs = {self.pk_url_kwarg: obj.pk, self.slug_url_kwarg: slug}
             try:
                 return reverse(self.view_name, kwargs=kwargs, request=request, format=format)
-            except:
+            except NoReverseMatch:
                 pass
     
             raise ValidationError('Could not resolve URL for field using view name "%s"', view_name)

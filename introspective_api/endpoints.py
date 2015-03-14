@@ -25,31 +25,55 @@ class ApiEndpointMixin(object):
 
         self.type       = config.pop('type', None)
         self.namespace  = config.pop('namespace', None)
+        self.app_name   = config.pop('app_name', None)
 
-    def get_complete_namespace(self, post_fix=False):
+    def get_complete_namespace(self, post_fix=False, regular=False):
         """
         @brief concats the namespaces from this and all parent endpoints
         """
-        namespace = self.namespace
-        paren_namespace = self.parent.get_complete_namespace() if self.parent else None
+        seperator = '.' if not regular else ':'
+        namespace = (self.namespace or '') + ('' if regular or not self.app_name else ((seperator if self.namespace else '' ) + self.app_name))
+        parent_namespace = (self.parent or self.root).get_complete_namespace(regular=regular)
 
-        if bool(paren_namespace) and bool(namespace):
-            namespace  = '.'.join([paren_namespace, namespace])
+        if parent_namespace and namespace:
+            if regular:
+                namespace  = seperator.join([parent_namespace, namespace])
+            else:
+                namespace  = seperator.join([parent_namespace, namespace][::-1])
         else:
-            namespace  = paren_namespace or namespace
+            namespace  = parent_namespace or namespace
 
         if namespace:
-            return namespace + ('.' if post_fix else '')
+            return namespace + (seperator if post_fix else '')
         else:
-            return ''
+            return None
+
+    def get_complete_app_name(self, post_fix=False):
+        """
+        @brief concats the namespaces from this and all parent endpoints
+        """
+        app_name = self.app_name
+        parent_app_name = (self.parent or self.root).get_complete_app_name()
+
+        if parent_app_name and app_name:
+            app_name  = '.'.join([parent_app_name, app_name][::-1])
+        else:
+            app_name  = parent_app_name or app_name
+
+        if app_name:
+            return app_name + ('.' if post_fix else '')
+        else:
+            return None
 
 
-    def get_absolute_name(self, ):
+    def get_absolute_name(self, current_app=None):
         """
         @brief the absolute name of this *view*. This includes all namespaces this view is within.
         """
-        if self.namespace:
-            return '%s.%s' % (self.get_complete_namespace(), self.name)
+        namespace = self.get_complete_namespace(regular=True)
+
+        if namespace:
+            return '%s:%s' % (namespace, self.name)
 
         return self.name
 
@@ -141,12 +165,18 @@ class ApiEndpointMixin(object):
                 own_url
             )
 
-        kwargs = {}
-        if self.namespace:
-            kwargs['namespace'] = self.namespace
 
         # register depending endpoints
         for endpoint in self.list_endpoints():
+            kwargs = {}
+            if endpoint.namespace or endpoint.app_name:
+                kwargs['namespace'] = endpoint.get_complete_namespace()
+                kwargs['app_name'] = endpoint.app_name
+                if kwargs['namespace'] is None:
+                    del kwargs['namespace']
+                if kwargs['app_name'] is None:
+                    del kwargs['app_name']
+
             if endpoint.type is self.REDIRECT_ENDPOINT:
                 redirect_url = '/'+ self.root.root_url + endpoint.target_endpoint.as_sitemap_url(absolute=True, python_formatting=True)
 
@@ -204,7 +234,7 @@ class ApiEndpointMixin(object):
         endpoint.initialize(self.root, self if self.root is not self else None)
 
 
-        self.root.register_view_name(endpoint.view_name, endpoint.get_complete_namespace())
+        self.root.register_view_name(endpoint.view_name, identifier=endpoint.get_complete_namespace(regular=True))
 
         # this way two endpoints can be named the same way,
         # but e.g. be different in their filter-pattern
@@ -535,6 +565,7 @@ class APIRoot(ApiEndpointMixin, APIView):
         super(APIRoot, self).__init__(**config)
 
         #self.namespace          = self.namespace or 'api'
+        #self.app_name           = self.app_name or 'api'
 
         self.type               = self.type or self.ROOT_ENDPOINT
 
@@ -581,6 +612,12 @@ class APIRoot(ApiEndpointMixin, APIView):
             api_root.generate_sitemap(version)
         )
     """
+    def get_complete_namespace(self, *args, **kwargs):
+        return 'api'
+    
+    def get_complete_app_name(self, *args, **kwargs):
+        return 'api'
+
     def options(self, request, *args, **kwargs):
         version = request.GET.get('version', '1.0')
 
@@ -597,20 +634,20 @@ class APIRoot(ApiEndpointMixin, APIView):
     def has_url(self, ):
         return True
 
-    def register_view_name(self, view_name=None, namespace=None):
+    def register_view_name(self, view_name=None, identifier=None):
         """
         @brief reigsters a view_name and ensures there is no existing view in this namespace registered with this name
         """
         if not view_name:
             return
 
-        if not namespace in self._view_names:
-            self._view_names[namespace] = []
+        if not identifier in self._view_names:
+            self._view_names[identifier] = []
 
-        elif view_name in self._view_names[namespace]:
-            raise ImproperlyConfigured, 'view_name "%s" found twice in namespace "%s"' % (view_name, namespace)
+        elif view_name in self._view_names[identifier]:
+            raise ImproperlyConfigured, 'view_name "%s" found twice in namespace "%s"' % (view_name, identifier)
 
-        self._view_names[namespace].append(view_name)
+        self._view_names[identifier].append(view_name)
 
     def register(self, endpoint, **config):
         config['active'] = config.get('active', bool(config.get('view_name', None)))
