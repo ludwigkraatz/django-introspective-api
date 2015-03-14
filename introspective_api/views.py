@@ -3,6 +3,7 @@ from django.views.generic import RedirectView
 from rest_framework import status
 from introspective_api.settings import api_settings
 from introspective_api.fields import HyperlinkedMetaField, HyperlinkedIdentityField
+from introspective_api.response import ApiResponse
 from django.core.exceptions import ValidationError
 from functools import update_wrapper
 from django.views.decorators.csrf import csrf_exempt
@@ -75,37 +76,51 @@ class APIView(APIView):
                              'section', 'self', 'service', 'start', 'stylesheet', 'subsection', 'successor-version',
                              'up', 'version-history', 'via', 'working-copy', 'working-copy-of']
 
-    def get_response_headers(self, request, status_code=status.HTTP_200_OK, serializer=None, object=None, **kwargs):
+    def get_response_headers(self, request, status_code=None, serializer=None, object=None, **kwargs):
+        status_code = status_code or status.HTTP_200_OK
         headers = super(APIView,self).get_response_headers(request, status_code, serializer=serializer, object=object, **kwargs)
 
-        if serializer and status_code == status.HTTP_200_OK:
-            if isinstance(serializer.data, (tuple,list)):
+        if serializer is None and getattr(self, 'serializer_class', None) is not None:
+            serializer = getattr(self, 'serializer_class')()
+        if status_code == status.HTTP_200_OK:
+            if serializer and serializer.object:
+                if isinstance(serializer.data, (tuple,list)):
+                    for name, field in serializer.get_meta_fields().iteritems():
+                        link_name = self.get_header_link_name_from_field(field, name)
+                        self.add_link_template_header(headers,
+                                                      name=link_name,
+                                                      url=request.build_absolute_uri('/')+serializer.field_to_template(field, name)
+                                                      )
+                elif isinstance(serializer.data, dict):
+                    for name, field in serializer.get_meta_fields().iteritems():
+                        link_name = self.get_header_link_name_from_field(field, name)
+                        try:
+                            if name != 'self':
+                                self.add_link_header(headers,
+                                                      name=link_name,
+                                                      url=field.field_to_native(serializer.object, name)
+                                                      )
+                            else:
+                                url = field.field_to_native(serializer.object, name)
+                                if request.get_full_path() != url:
+                                    # why Content-Location:
+                                    # http://tools.ietf.org/html/rfc2616#section-14.14
+                                    headers['Content-Location'] = url
+                        except ValidationError: #TODO ugly workaround..
+                            raise
+                            self.add_link_template_header(
+                                    headers,
+                                    name=link_name,
+                                    url=request.build_absolute_uri('/')+serializer.field_to_template(field, name)
+                                    )
+            elif serializer:
+                # TODO: evaluate / test
                 for name, field in serializer.get_meta_fields().iteritems():
+                    link_name = self.get_header_link_name_from_field(field, name)
                     self.add_link_template_header(headers,
-                                                  name=self.get_header_link_name_from_field(field, name),
+                                                  name=link_name,
                                                   url=request.build_absolute_uri('/')+serializer.field_to_template(field, name)
                                                   )
-            elif isinstance(serializer.data, dict):
-                for name, field in serializer.get_meta_fields().iteritems():
-                    try:
-                        name = self.get_header_link_name_from_field(field, name)
-                        if name != 'self':
-                            self.add_link_header(headers,
-                                                  name=name,
-                                                  url=field.field_to_native(serializer.object, name)
-                                                  )
-                        else:
-                            url = field.field_to_native(serializer.object, name)
-                            if request.get_full_path() != url:
-                                # why Content-Location:
-                                # http://tools.ietf.org/html/rfc2616#section-14.14
-                                headers['Content-Location'] = url
-                    except ValidationError: #TODO ugly workaround..
-                        self.add_link_template_header(
-                                headers,
-                                name=self.get_header_link_name_from_field(field, name),
-                                url=request.build_absolute_uri('/')+serializer.field_to_template(field, name)
-                                )
 
         return headers
 
@@ -136,8 +151,25 @@ class APIView(APIView):
         else:
             headers['Link'] += '<{url}>; rel="{rel}"; title="{name}"'.format(url=url, name=name, rel=rel or 'related')
 
+    def options(self, request, *args, **kwargs):
+        """
+        Handler method for HTTP 'OPTIONS' request.
+        We may as well implement this as Django will otherwise provide
+        a less useful default implementation.
+        """
+        headers = self.get_response_headers(request)#, None, serialier, objectClass)
+        return ApiResponse(self.metadata(request), status=status.HTTP_200_OK, headers=headers).finalize_for(request)
+
 class EndpointView(APIView):
-    pass
+
+    def options2(self, request, *args, **kwargs):
+        """
+        Handler method for HTTP 'OPTIONS' request.
+        We may as well implement this as Django will otherwise provide
+        a less useful default implementation.
+        """
+        headers = self.get_response_headers(request)#, None, serialier, objectClass)
+        return Response(self.metadata(request), status=status.HTTP_200_OK, headers=headers)
 
 class RedirectView(APIView, RedirectView):
     origin_view = None
