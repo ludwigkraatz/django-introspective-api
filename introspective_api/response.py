@@ -1,6 +1,5 @@
 from rest_framework.response import Response
 from introspective_api.settings import api_settings
-from introspective_api.views import APIView
 
 class DictWithApiCode(dict):
     def __init__(self, data, code=None, code_prefix=api_settings.API_RESPONSE_CODE_PREFIX):
@@ -24,6 +23,7 @@ class ApiResponse(Response):
             self.data = DictWithApiCode(self.data, self._code)
 
     def finalize_for(self, request):
+        from introspective_api.views import APIView
         return APIView().finalize_response(request, self) # TODO: ugly
 
     @property
