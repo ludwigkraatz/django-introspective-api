@@ -314,7 +314,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             
             function addLink(link, url) {
                 url = unpackURL(url, data);
-                
                 $this.__URIlinks[link] = url;
                 if ($this.__links[link] === undefined) {
                     $this.__links[link] = url;
@@ -332,6 +331,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         __updateURLLinks: function(additionalLinks){
             var $this = this;
             var data = {}
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(updateURLLinks)', 'additional links', additionalLinks, this])
             for (var entry in $this.__content['json']) {
                 data[entry] = $this.__content['json'][entry];
             }
@@ -786,6 +786,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__initialized = true;
             this.__initializing = undefined;
             this.__trigger('post-load', [result])
+            this.__trigger('initialized', [])
             this.__trigger('set-fixture', [result])
             return this
         },
@@ -925,7 +926,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                             $this.__content[formatID][target] = content;
                         })
                     }*/
-                    return $this.__objects[targetID].__onGet(wrapped, format);
                 
                 }else{
                     _log(log, 'error', ['target "'+ target +'" not found', targetID]);
@@ -1170,6 +1170,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     if (settings.callback)settings.callback(result);
                 }
                 
+                // TODO: it can happen that the id is completed, the time this method executes! (had this case)
                 this.__apiClient.registerCallbacksForRequest(this.__initializing, callbacks);
                 
             }else if (!settings.format && this.__initialized && (settings.forceReload === undefined || settings.forceReload === false)) {
@@ -1212,7 +1213,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             $this.__startLoading(result);
             var request = {
                 type: settings.loadContent ? 'get' : 'head',
-                data: $this.__data,
                 done: function (response, text, jqXHR) {                       
                     $this.__finishedLoading(result);
                     result.registerSuccess(response, text, jqXHR);      
@@ -1249,7 +1249,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var ajaxID = $this.__apiClient.add(request, requestSettings);
             $this.__sync.push(ajaxID);
             result.registerRequest(ajaxID, request);
-            if ($this.__initializing === undefined) {
+            if ($this.__initializing === undefined && settings.loadContent) {
                 $this.__initializing = ajaxID;
             };            
             
@@ -1333,7 +1333,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             if (settings.replace) { // TODO: this is no replacement...
                 if (format == 'json') {
                     for (var target in this.__content[format]){
-                        if (!content.hasOwnProperty(target)) {
+                        if (!content || !content.hasOwnProperty(target)) {
                             this.__update(target, undefined, uncommitted)
                         }
                     }
@@ -1398,7 +1398,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var jqXHR = result.jqXHR;
             additionalLinks = {};
             settings = settings || {};
-            
+            if (!result.request.type) {
+                return _log(settings.log || this.__log, 'warning', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', 'result doesnt contain any resquest', result])
+            }
             // todo:
             /*                
                 $this.__onChange(target, state);
