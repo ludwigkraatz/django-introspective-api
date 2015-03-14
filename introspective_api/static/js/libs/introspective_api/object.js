@@ -1967,6 +1967,17 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
     })*/
     
+    function ApiPlaceholder() {
+        this.__init.apply(this, arguments);
+    };
+    
+    $.extend(ApiPlaceholder.prototype, ApiObject.prototype);
+    $.extend(ApiPlaceholder.prototype, {
+        __isBlank: function(apiClient, parent, target, data){
+            return true
+        },
+    })
+    
     function LinkedRelationship() {
         this.__init.apply(this, arguments);
     };
