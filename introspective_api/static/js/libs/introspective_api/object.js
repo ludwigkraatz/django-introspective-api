@@ -785,6 +785,79 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this
         },
         
+        __resolveObj: function(targetID, settings){
+            var old = this.__objects[targetID],
+                $this = this,
+                obj,
+                _settings = $.extend({}, settings),
+                target = LINK_HEADER_TARGETS.indexOf(settings.target) == -1 ? settings.target : settings.data[target],
+                accessType;
+                
+            if (old && !old.__isBlank()) {
+                return old
+            }
+            if (old === undefined || old.__isBlank()) {
+                if ($this.__links[settings.target] != undefined || $this.__links[target] != undefined || settings.target == 'relationship' ){ // TODO: only if were on object endpoint!! LINK_HEADER_TARGETS.indexOf(settings.target) != -1){
+                    var resource;
+                    _settings.url = this.__asURL(settings.target, settings.data);
+                    if (settings.target == 'relationship') {
+                        resource = new LinkedRelationship(_settings);
+                        var relationship = settings.data;
+                        if (relationship instanceof Object) {
+                            relationship = settings.data.relationship
+                        }
+                        $this.__objects[relationship] = resource;
+                    }else{
+                        resource = new LinkedResource(settings);
+                    }
+                    obj = resource;
+                    accessType = "related";
+                }else if ($this.__content[target] != undefined) {
+                    _settings.data = null;
+                    var attribute = new ResourceAttribute(_settings);
+                    obj = attribute;
+                    accessType = "attribute";
+                }else{// && $this.__initialized != true) {
+                    if (old && old.__isBlank()) {
+                        obj = old;
+                    }else{
+                        _settings.isBlank = true
+                        var placeholder = new ApiPlaceholder(_settings);
+                        $this.__unevaluatedObjects[targetID] = settings;
+                        obj = placeholder;
+                        accessType = "unknown";
+                        if (!$this.__initialized) {
+                            $this.__bind('initialized', function(){
+                                $this.__resolveObj(targetID, settings)
+                            })
+                        }
+                    }
+                }
+            }
+            if (obj !== old) {
+                if (old) {
+                    old.replaceWith(obj);
+                }
+                
+                if ($this.__unevaluatedObjects[targetID]) {
+                    if (obj.__isBlank() && !this.__isBlank()) {
+                        // metadata might have changed. check.
+                        this.__discover(function(){ // TODO: discover - o get not just the links with value, but all possible
+                            for (var targetID in $this.__unevaluatedObjectsObject) {
+                                $this.__resolveObj(targetID, $this.__unevaluatedObjectsObject[targetID]);
+                            }
+                        }); // TODO: force: true
+                    } else{
+                        delete $this.__unevaluatedObjects[targetID];
+                    }
+                }
+                $this.__objects[targetID] = obj;
+                this.__trigger('accessed-' + accessType, [obj])
+            }
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(resolveObject)', 'resolving', targetID, 'and', settings, 'from', this, 'to', obj, '(links: ', $.extend({}, this.__links),')'])
+            return obj;
+        },
+        
         __get: function(targetOrSettings, _data, wrapped){
             // init            
             var $this       = this;
@@ -812,67 +885,28 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var targetID = this.__parseTarget(target, data);
             
             // logic
+            var settings = {
+                    apiClient:this.__apiClient,
+                    parent:this, target:target,
+                    data:data,
+                    initialContent:settings.initialContent || $this.__content[target],
+                    log:log,
+                    //event_handler: settings.event_handler || this.event_handler
+                },
+                obj;
             
             if (this.__isBlank()) {
-                var _placeholder = new ApiObject({
-                        apiClient:this.__apiClient,
-                        parent:this, target:target,
-                        data:data,
-                        initialContent:settings.initialContent,
-                        log:log,
-                        event_handler: settings.event_handler || this.event_handler,
-                        isBlank: true
-                    });
-                if (wrapped === false) {
-                    _log(log, 'error', ['cannot get unwrapped', _placeholder, 'of blank', this])
-                    throw Error('cannot get unwrapped resource of blank one');
-                }
+                settings.isBlank = true;
+                var _placeholder = new ApiPlaceholder(settings);
                 this.__bind('replaced', function(event, newParent){
                     _placeholder.replaceWith(newParent.__get(targetOrSettings, _data, wrapped))
                 })
-                return _placeholder.__onGet(wrapped, format);
-            }
-            
-            if (target) {
+                obj = _placeholder;
+            }else if (target) {
                 //var wasCreated = undefined;
-                if (($this.__links[target] != undefined) && ($this.__objects[targetID] === undefined)){
-                    var settings = {
-                        apiClient:this.__apiClient,
-                        parent:this, target:target,
-                        data:data,
-                        initialContent:settings.initialContent || $this.__content[target],
-                        log:log,
-                        event_handler: settings.event_handler || this.event_handler
-                    },
-                        resource;
-                    if (target == 'relationship') {
-                        resource = new LinkedRelationship(settings);
-                        var relationship = data;
-                        if (relationship instanceof Object) {
-                            relationship = data.relationship
-                        }
-                        $this.__objects[relationship] = resource;
-                    }else{
-                        resource = new LinkedResource(settings);
-                    }
-                    
-                    ///wasCreated = resource;
-                    $this.__objects[targetID] = resource;
-                    this.__trigger('accessed-related', [resource])
-                }else if ($this.__objects[targetID] === undefined && $this.__content[target] != undefined) {
-                    var attribute = new ResourceAttribute({apiClient: $this.__apiClient, parent:$this, target:target, data:null, initialContent:settings.initialContent || $this.__content[target], log:log});
-                    $this.__objects[targetID] = attribute;
-                    //wasCreated = attribute;
-                    this.__trigger('accessed-attribute', [attribute]);
-                }else if ($this.__objects[targetID] === undefined){// && $this.__initialized != true) {
-                    var attribute = new ResourceAttribute({apiClient:$this.__apiClient, parent:$this, target:target, data:null, initialContent:settings.initialContent || $this.__content[target], log:log});
-                    //wasCreated = attribute;
-                    $this.__unevaluatedObjects[targetID] = attribute;
-                    $this.__objects[targetID] = attribute;
-                    this.__trigger('accessed-unknown', [attribute]);
-                }
+                obj = this.__resolveObj(targetID, settings)
                 
-                if ($this.__objects[targetID] != undefined) {
+                if (obj != undefined) {
                     var state = {
                         "status": "found",
                         "timestamp": +new Date()/1000,
@@ -905,10 +939,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     log:log
                 });
                 this.__trigger('accessed-clone', [clone]);
-                return clone
+                obj = clone;
+            }
+            if (obj.__isBlank() && wrapped === false) {
+                _log(log, 'error', ['cannot get unwrapped placeholder ', obj, 'of ', this])
+                throw Error('cannot get unwrapped blank resource');
             }
             
-                     
+            return obj.__onGet(wrapped, format);
             
         },
         
@@ -1089,7 +1127,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     request.dataType = format.format;
                     delete format.format
                     for  (var arg in format) {
-                        // doto: ass query args
+                        // todo: ass query args
                     }
                 }
                 var requestSettings = {log: settings.log || this.__log};
