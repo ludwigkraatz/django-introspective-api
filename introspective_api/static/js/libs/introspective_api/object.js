@@ -1,5 +1,5 @@
 define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
-    
+    LINK_HEADER_TARGETS = ['link', 'relationship']
     function unpackURL(url, data) {        
         if (url.indexOf('{') != -1){
             for (var substitut in data) {
@@ -10,11 +10,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         }
         return url
     }
-    function parseLinkHeader(header) {
-        return {}
+    function parseLinkHeader(link_header) {
+            link_header_expr = /<([a-z:/\-0-9\.?&_=]*)>; rel="([a-zA-Z0-9:/\-?= ]*)"(?:; title="([a-zA-Z0-9:/\-?= ]*)",?)*/g
+            links = {}
+            while (link = link_header_expr.exec(link_header)){
+                name = link[3] ? link[3] : link[2];
+                links[name] = link[1];
+            }
+            return links
     };
     function parseLinkTemplateHeader(header) {
-        return {}
+        templatelink_header_expr = /<([a-z:{}/\-0-9\.?&_=]*)>; rel="([a-zA-Z0-9:/\-?= ]*)"(?:; title="([a-zA-Z0-9:/\-?= ]*)",?)*/g
+        links = {}
+        while (link = templatelink_header_expr.exec(header)){
+            name = link[3] ? link[3] : link[2];
+            links[name] = link[1];
+        }
+        return links
     };
     function isEmpty(obj){
         for (var key in obj) {
@@ -1382,7 +1394,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 additionalLinks['.'] = jqXHR.url;
             }
             $.extend(additionalLinks, parseLinkHeader(jqXHR.getResponseHeader('Link')));
-            $.extend(additionalLinks, parseLinkTemplateHeader(jqXHR.getResponseHeader('Link-Template')));                             
+            $.extend(additionalLinks, parseLinkTemplateHeader(jqXHR.getResponseHeader('Link-Template')));
             this.__updateURLLinks(additionalLinks);
             
             return $this
