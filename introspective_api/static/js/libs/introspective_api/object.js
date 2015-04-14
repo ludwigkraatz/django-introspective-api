@@ -379,7 +379,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 return this.__URLlinks[data[target]]
             }
             if (target && this.__URLlinks[target]) {
-                return this.__URLlinks[target]
+                return unpackURL(this.__URLlinks[target], data)
             }
             
             var links = this.__URLlinks;
@@ -450,7 +450,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__path = new Path(this.__path, target, this.__data);
             //this.__links = {};
             this.__updateURILinks();
-            var new_url = url || this.__asURL(target);
+            var new_url = url || this.__asURL(target, this.__data);
             if (new_url){
                 this.__updateURLLinks({'.': new_url});
             }
@@ -793,10 +793,13 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }else if (data instanceof Object) {
                 var args = "";
                 for (var entry in data) {
-                    args += entry;
-                    args += ':';
+                    if (this.__links[entry] === undefined || entry != target) {
+                        continue
+                    }
+                    /*args += entry;
+                    args += ':';*/
                     args += data[entry];
-                    args += ';';
+                    //args += ';';
                 }
                 if (args) {
                     return target + '|' + args
@@ -823,21 +826,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 $this = this,
                 obj,
                 _settings = $.extend({}, settings),
-                target = LINK_HEADER_TARGETS.indexOf(settings.target) == -1 ? settings.target : settings.data[target],
+                target = LINK_HEADER_TARGETS.indexOf(settings.target) == -1 ? settings.target : settings.data[settings.target],
                 accessType;
                 
             if (old && !old.__isBlank()) {
                 return old
             }
             if (old === undefined || old.__isBlank()) {
-                if ($this.__links[settings.target] != undefined || $this.__links[target] != undefined || settings.target == 'relationship' ){ // TODO: only if were on object endpoint!! LINK_HEADER_TARGETS.indexOf(settings.target) != -1){
+                if ($this.__links[_settings.target] != undefined || $this.__links[target] != undefined || _settings.target == 'relationship' ){
+                    // TODO: only if were on object endpoint!! LINK_HEADER_TARGETS.indexOf(settings.target) != -1){
+
                     var resource;
-                    _settings.url = this.__asURL(settings.target, settings.data);
+                    _settings.url = this.__asURL(_settings.target, _settings.data);
                     if (settings.target == 'relationship') {
                         resource = new LinkedRelationship(_settings);
-                        var relationship = settings.data;
+                        var relationship = _settings.data;
                         if (relationship instanceof Object) {
-                            relationship = settings.data.relationship
+                            relationship = _settings.data.relationship
                         }
                         $this.__setObj(relationship, resource);
                     }else{
