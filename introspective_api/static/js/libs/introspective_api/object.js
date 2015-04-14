@@ -118,6 +118,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.results.push(result);
         },
         
+        getResponse: function(){ // TODO
+            return JSON.parse(this.responseText) || this.response
+        },
+        
         registerSuccess: function(response, status, jqXHR){
             if (this.raw) {
                 this.response = response;
