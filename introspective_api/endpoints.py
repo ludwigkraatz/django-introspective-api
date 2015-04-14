@@ -385,6 +385,19 @@ class ApiEndpoint(ApiEndpointMixin):
         @brief the object filter is being applied on a "collection" in order to receive a requested object.
         @returns a lookup dict, that is passed (**dict) as kwargs for djangos filter() method.
         """
+        return self._get_object_data(request, args, kwargs, complete=True)
+
+    def get_object_presets(self, request, *args, **kwargs):
+        """
+        used when updating new objects content by its endpoint position
+        """
+        return self._get_object_data(request, args, kwargs, complete=False)
+
+    def _get_object_data(self, request, args, kwargs, complete=False):
+        """
+        @brief the object filter is being applied on a "collection" in order to receive a requested object.
+        @returns a lookup dict, that is passed (**dict) as kwargs for djangos filter() method.
+        """
         filter_kwargs = {}
 
         for endpoint, lookup_field in self.lookup_fields.items():
@@ -392,8 +405,8 @@ class ApiEndpoint(ApiEndpointMixin):
             if isinstance(endpoint, basestring):
                 filter_kwargs.update(lookup_field(self, request, *args, **kwargs))
             else:
-                for endpoint_lookup_field, endpoint_lookup_value in endpoint.get_object_filter(request, *args, **kwargs).iteritems():
-                    lookup_field = '%s__%s' % (lookup_field, endpoint_lookup_field)
+                for endpoint_lookup_field, endpoint_lookup_value in endpoint._get_object_data(request, args, kwargs, complete).iteritems():
+                    lookup_field = '%s__%s' % (lookup_field, endpoint_lookup_field) if complete else lookup_field
 
                     filter_kwargs[lookup_field]    = endpoint_lookup_value
 

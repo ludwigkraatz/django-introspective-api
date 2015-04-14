@@ -12,6 +12,12 @@ from rest_framework.mixins import *
 import itertools
 
 
+class CreateModelMixin(CreateModelMixin):
+    def create(self, request, *args, **kwargs):
+        endpoint_filter = self.endpoint.get_object_presets(request, *self.args, **self.kwargs)
+        request.DATA.update(endpoint_filter)
+        return super(CreateModelMixin, self).create(request, *args, **kwargs)
+
 
 class ListModelMixin(ListModelMixin):
     """
