@@ -839,7 +839,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         if (relationship instanceof Object) {
                             relationship = settings.data.relationship
                         }
-                        $this.__objects[relationship] = resource;
+                        $this.__setObj(relationship, resource);
                     }else{
                         // we don't know yet whether it is a resource or resourceListr
                         resource = new ApiObject(_settings);
@@ -885,11 +885,21 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         delete $this.__unevaluatedObjects[targetID];
                     }
                 }
-                $this.__objects[targetID] = obj;
+                this.__setObj(targetID, obj);
                 this.__trigger('accessed-' + accessType, [obj])
             }
             _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(resolveObject)', 'resolving', targetID, 'and', settings, 'from', this, 'to', obj, '(links: ', $.extend({}, this.__links),')'])
             return obj;
+        },
+
+        __setObj: function(target, obj){
+            var $this = this;
+            this.__objects[target] = obj;
+            obj.__bind('replaced', function(event, newObj){
+                if ($this.__objects[target] === obj) {
+                    $this.__objects[target] = newObj;
+                }
+            })
         },
         
         __get: function(targetOrSettings, _data, wrapped){
@@ -2234,7 +2244,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__lookupList[resource] = index
             if (isObj) {       
              // todo: uuid => global storage as in __get as well
-                this.__objects[resourceID] = resource;
+                this.__setObj(resourceID, resource);
             }
             
             if (commit && (uncommitted || !this.__uncommitted.hasOwnProperty(resourceID))) {
