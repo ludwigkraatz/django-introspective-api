@@ -931,6 +931,18 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 data[target] = _data;
             }
             var format = this.__parseFormat(settings.format);
+            if (target === undefined && data) {
+                for (var key in data) {
+                    if (this.__links[key]) {
+                        target = key;
+                        break
+                    }
+                }
+                if (!target) {
+                    log.error('(introspectiveApiClient)', '(ApiObject)', 'could parse target.', target, data, this);
+                    throw Error('could not parse target')
+                }
+            }
             var targetID = this.__parseTarget(target, data);
             
             // logic
