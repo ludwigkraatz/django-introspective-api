@@ -35,6 +35,8 @@ DEFAULTS = {
         
     'LOG_CLIENT': False,
     
+    'PAGINATE_BY_PARAM': 'paginate_by',
+    
     'PAGINATION_IN_HEADER': True,
     'PAGINATION_RANGE_HEADER_TOKEN':
         'x-records',

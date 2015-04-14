@@ -185,9 +185,9 @@ class RedirectView(APIView, RedirectView):
                     value = value()
                 kwargs[key] = str(value)
 
-        return super(Redirect, self).get_redirect_url(**kwargs)
+        return super(RedirectView, self).get_redirect_url(**kwargs)
 
     def get(self, request, *args, **kwargs):
         if self.redirect_lookup and self.origin_view:
             self.lookup_object = self.origin_view(request, *args, **kwargs).get_object()
-        return super(Redirect, self).get(request, *args, **kwargs)
+        return super(RedirectView, self).get(request, *args, **kwargs)
