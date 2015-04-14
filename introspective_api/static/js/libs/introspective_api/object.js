@@ -280,7 +280,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__initializing = undefined;
             this.__saving = false;
             this.__status = {};
-            this.__path = null
+            this.__path = null;
+            this.__info = {}
         },
         
         __init: function(settings){
@@ -1418,6 +1419,42 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this
             
         },
+
+        __update_info: function(result){
+            var jqXHR = result.jqXHR,
+                $this = this;
+
+            if (jqXHR) {
+                var ranges = jqXHR.getResponseHeader('Accept-Ranges');
+                this.__info.ranges = ranges;
+                this.__info.is_list = ranges ? ranges.indexOf('x-records') != -1 : false;
+                this.__info.is_resource = !this.__info.is_list;
+            }
+
+            if (this.constructor === ApiObject) {
+                var clone_config = {
+                    apiClient:$this.__apiClient,
+                    parent:$this,
+                    asClone:true,
+                    log:$this.__log,
+                    data: $this.__data,
+                    target: $this.__target
+                },
+                    replacement;
+                if (this.__info.is_list) {
+                    list = this.__get();
+                    replacement = new LinkedRelationship(clone_config);
+                }else if (this.__info.is_resource) {
+                    // TODO: this leads to unacceptable behaviour as it sets this to blank
+                    //replacement = new LinkedResource(clone_config);
+                }
+                if (replacement) {
+                    replacement.__updateFromResponse(result.getResponse(), result)
+                    $this.__is_blank = true;
+                    $this.__replaceWith(replacement);
+                }
+            }
+        },
         
         __updateFromResponse: function(response, result, settings){
             var $this = this;
@@ -1427,6 +1464,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             if (!result.request.type) {
                 return _log(settings.log || this.__log, 'warning', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', 'result doesnt contain any resquest', result])
             }
+            
+            this.__update_info(result);
             // todo:
             /*                
                 $this.__onChange(target, state);
@@ -2042,17 +2081,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     };
     
     $.extend(LinkedResource.prototype, ApiObject.prototype);
-    /*$.extend(LinkedResource.prototype, {
-        __init: function(apiClient, parent, target, data){
-            this.__reset_obj();
-            
-            this.__apiClient  = apiClient;
-            this.__parent     = parent;
-            this.__path       = new Path(parent.path, target, data);
-            
-            this.__updateURILinks();
-        },
-    })*/
+    
     
     function ApiPlaceholder() {
         this.__init.apply(this, arguments);
