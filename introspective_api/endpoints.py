@@ -12,6 +12,11 @@ from django.conf import settings
 import copy
 
 
+class EndpointFilterBackend(object):
+    def filter_queryset(self, request, queryset, view):
+        endpoint_filter = view.endpoint.get_object_filter(request, *view.args, **view.kwargs)
+        return queryset.filter(**endpoint_filter)
+
 
 class ApiEndpointMixin(object):
     SELECTOR_ENDPOINT = 'select' #TODO: Select should return 0/1, filter many
@@ -284,6 +289,10 @@ class ApiEndpointMixin(object):
             #AutoView.__doc__ = view_model.__doc__ #TODO
 
             config['view_class'] = AutoView
+
+            if not hasattr(config['view_class'], 'filter_backends'):
+                config['view_class'].filter_backends = ()
+            config['view_class'].filter_backends += (EndpointFilterBackend, )
 
         endpoint = ApiEndpoint(
                         name=name,
