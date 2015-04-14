@@ -841,7 +841,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         }
                         $this.__objects[relationship] = resource;
                     }else{
-                        resource = new LinkedResource(settings);
+                        // we don't know yet whether it is a resource or resourceListr
+                        resource = new ApiObject(_settings);
                     }
                     obj = resource;
                     accessType = "related";
@@ -961,7 +962,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }else{
                 // $.extend(true, new content.constructor(), content)
                 var content = settings.initialContent || this.__content['json'];
-                var clone = new this.constructor({
+                var clone_config = {
                     apiClient:this.__apiClient,
                     parent:this,
                     target:null,
@@ -969,7 +970,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     asClone:true,
                     initialContent: content,
                     log:log
-                });
+                },
+                    clone = new this.constructor(clone_config);
                 this.__trigger('accessed-clone', [clone]);
                 obj = clone;
             }
@@ -1181,8 +1183,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 settings.callback = callbackOrSettings
             }else if (callbackOrSettings instanceof Object) {
                 $.extend(settings, callbackOrSettings);
-            }else{
-                throw Error('load needs a callback or settings obj')
             }
             
             if (this.__initializing != undefined) {
@@ -1228,7 +1228,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 settings.callback = callbackOrSettings;
             }else if (callbackOrSettings instanceof Object){
                 $.extend(settings, callbackOrSettings);
-            }else throw Error('".refresh()" need callback or settings attr')
+            }
             
             if (settings.loadContent === undefined) {
                 settings.loadContent = true;
