@@ -27,6 +27,7 @@ class ApiEndpointMixin(object):
     def __init__(self, **config):
         self._endpoint_registry = {}
         self._endpoints = {}
+        self.links = {}
 
         self.type       = config.pop('type', None)
         self.namespace  = config.pop('namespace', None)
@@ -191,6 +192,7 @@ class ApiEndpointMixin(object):
 
                 redirect_lookup = endpoint.redirect_lookup
 
+                origin_view = None
                 if redirect_lookup:
                     origin_view = self.view_class.as_view(dispatch=False)
 
@@ -273,6 +275,8 @@ class ApiEndpointMixin(object):
         elif config.get('view_config'):
             view_config = config.get('view_config')
             view_model = view_config.get('model')
+            endpoint_links = self.links
+            api_root = self.root
 
             from . import serializers
             class AutoSerializer(serializers.ModelSerializer):
@@ -281,9 +285,25 @@ class ApiEndpointMixin(object):
                     model       =   view_model
 
             class AutoView(view_config.get('base_view')):
-
                 serializer_class = AutoSerializer
                 model = view_model
+                def get_response_headers(self, *args, **kwargs):
+                    headers = super(AutoView, self).get_response_headers(*args, **kwargs)
+                    for name, endpoint in endpoint_links.items():
+                        link_name = name
+                        link_url = '/' + api_root.as_url(absolute=True) + endpoint.as_sitemap_url(absolute=True, with_name=name) + '/'  # TODO: this slash - fix is ... - also: why isnt it absolute?!
+                        if '{' not in link_url:
+                            self.add_link_header(headers,
+                                                  name=link_name,
+                                                  url=link_url
+                                                  )
+                        else:
+                            self.add_link_template_header(
+                                    headers,
+                                    name=link_name,
+                                    url=link_url
+                                    )
+                    return headers
 
             AutoView.__name__ = view_model.__name__
             #AutoView.__doc__ = view_model.__doc__ #TODO
@@ -437,7 +457,6 @@ class ApiEndpoint(ApiEndpointMixin):
                 for endpoint in self._endpoints[name]:
                     yield endpoint
 
-
     def as_url(self, absolute=False):
         """
         @returns the url, this endpoint is accessible with
@@ -499,7 +518,7 @@ class ApiEndpoint(ApiEndpointMixin):
         return self.get_fitlers_object_name()
 
 
-    def as_sitemap_url(self, absolute=False, python_formatting=False):
+    def as_sitemap_url(self, absolute=False, python_formatting=False, with_name=None):
         """
         @returns the sitemap url string
         @brief the sitemap urls might contain {vars} when in the sitemap.json or (vars)%s for django urls (python formatting)
@@ -508,15 +527,16 @@ class ApiEndpoint(ApiEndpointMixin):
 
             if not python_formatting:
                 # href - LINK Template formatting
-                url = '{%s}' % self.get_fitlers_field_name()#self.get_name(for_sitemap=True)
+                url = '{%s}' % (with_name or self.get_fitlers_field_name())
+                    #self.get_name(for_sitemap=True)
             else:
-                url = '%(' + ('%s)s' % self.name)
+                url = '%(' + ('%s)s' % (with_name or self.name))
         elif self.type is None:
-            url = '%s' % self.name
+            url = '%s' % (with_name or self.name)
         elif self.type is self.REDIRECT_ENDPOINT:
             #absolute=False
             #url = self.target_endpoint.as_sitemap_url(absolute=True)
-            url = '%s' % self.name
+            url = '%s' % (with_name or self.name)
         else:
             raise Exception, 'not implemented'
 
@@ -609,6 +629,10 @@ class APIRoot(ApiEndpointMixin, APIView):
                 ]
             }
         }
+
+    def as_url(self, absolute=False, **kwargs):
+        return self.root_url
+    
     """
     def post(self, request, *args, **kwargs):
         action = request.DATA.get('action', None)
@@ -761,8 +785,6 @@ class APIRoot(ApiEndpointMixin, APIView):
                     'js':         self.statics_config['js'],
                     'endpoints':  self.get_static_endpoints()
                 }
-
-
 
 
 api_root = APIRoot()
