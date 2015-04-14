@@ -433,7 +433,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __isCreated: function(){// todo
-            return this.__sync.length > 0 && this.__data;
+            return this.__sync.length > 0 && !$.isEmptyObject(this.__data);
         },
         
         __isBlank: function(){// todo
