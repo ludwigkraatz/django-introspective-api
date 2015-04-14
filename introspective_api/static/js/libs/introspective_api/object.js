@@ -813,7 +813,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__initialized = true;
             this.__initializing = undefined;
             this.__trigger('post-load', [result])
-            this.__trigger('initialized', [])
+            this.__trigger('initialized', [result])
             this.__trigger('set-fixture', [result])
             return this
         },
@@ -1338,7 +1338,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__updateContent(content, dataType, uncommitted, settings);
         },
         
-        __updateContent: function(content, dataType, uncommitted, settings){
+        __updateContent: function(content, dataType, uncommitted, settings, result){
             if (uncommitted === undefined) {
                 uncommitted = true;
             }
@@ -1473,7 +1473,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             if (result.request.type.toLowerCase() == 'post' && !response) {
                 // TODO: check "Location" header and get content from there
                 _log(settings.log || this.__log, 'error', ['(IntrospectiveApi)', '(ApiObject)', '(TODO)', 'fetch resource from Location Header'])
-            }else{ 
+            }else{
                 settings.replace = ['head', 'patch'].indexOf(result.request.type.toLowerCase()) != -1 ? false : true;
                 var data = ['put', 'post', 'patch'].indexOf(result.request.type.toLowerCase()) != -1 ?
                                 response || result.request.data
@@ -1491,9 +1491,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 }        */                           
                 
 
-                $this.__initialized = true;
-                $this.__trigger('initialized', [])
-                $this.__initializing = undefined;
+                if (!$this.__initialized) {
+                    $this.__initialized = true;
+                    $this.__trigger('initialized', [result])
+                    $this.__initializing = undefined;
+                }
             }     
             if (result.request.type.toLowerCase() == 'post') {
                 var location = jqXHR.getResponseHeader('Location');
@@ -1506,7 +1508,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             $.extend(additionalLinks, parseLinkHeader(jqXHR.getResponseHeader('Link')));
             $.extend(additionalLinks, parseLinkTemplateHeader(jqXHR.getResponseHeader('Link-Template')));
             this.__updateURLLinks(additionalLinks);
-            
             return $this
         },
          
