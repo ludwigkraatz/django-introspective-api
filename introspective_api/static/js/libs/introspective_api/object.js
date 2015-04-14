@@ -2285,6 +2285,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this.__get(targetOrSettings, _data, true)
         },
         
+        __each: function(callback){
+            var list = this.__content['json'];
+            for (var index in list){
+                var elem = this.__get(undefined, list[index]);
+                elem.__load(callback);
+            }
+        },
+        
         __add: function(obj, uncommitted){
             var isCreated = obj ? obj.isCreated() : false,
                 $this = this;
@@ -2306,6 +2314,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
 
         all: function(){
             return this.__all.apply(this, arguments)
+        },
+
+        each: function(){
+            return this.__each.apply(this, arguments)
         },
     })
     
