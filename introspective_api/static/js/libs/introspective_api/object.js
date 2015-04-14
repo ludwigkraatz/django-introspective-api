@@ -299,7 +299,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__event_handler = {};
             this.__reset_obj(initialContent);
             
-            
+            this.__id_attrs = ['uuid', 'id']
             this.__apiClient  = apiClient;
             this.__path       = parent ? parent.__path : null;
             if (!asClone && target){
@@ -783,8 +783,17 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return 'json'
         },
         
-        __getID: function(){
-            return this.__data['uuid'] || this.__data['id']
+        __getID: function(data){
+            if (data === undefined) {
+                data = this.__data
+            }
+            for (var index in this.__id_attrs){
+                var attr_name = this.__id_attrs[index];
+                if (data[attr_name]) {
+                    return data[attr_name]
+                }
+            }
+            return undefined
         },
         
         __parseTarget: function(target, data){
@@ -931,7 +940,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 data[target] = _data;
             }
             var format = this.__parseFormat(settings.format);
-            if (target === undefined && data) {
+            if (target === undefined && !$.isEmptyObject(data)) {
                 for (var key in data) {
                     if (this.__links[key]) {
                         target = key;
@@ -939,10 +948,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     }
                 }
                 if (!target) {
+                    for (var index in this.__id_attrs){
+                        var attr_name = this.__id_attrs[index];
+                        if (data[attr_name]) {
+                            target = attr_name;
+                            break
+                        }
+                    }
+                }
+                if (!target) {
                     log.error('(introspectiveApiClient)', '(ApiObject)', 'could parse target.', target, data, this);
                     throw Error('could not parse target')
                 }
             }
+            //if (!target) {
+            //    log.error('(introspectiveApiClient)', '(ApiObject)', 'could parse target.', target, data, this);
+            //    throw Error('could not parse target')
+            //}
             var targetID = this.__parseTarget(target, data);
             
             // logic
