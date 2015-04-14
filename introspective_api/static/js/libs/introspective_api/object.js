@@ -1398,7 +1398,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         var id = obj.__getID();
                         if (id) {
                             // TODO: because introspective api requires UUID, maybe rather use a global __objects storage
-                            this.__objects[id] = obj;
+                            if (result)obj.__sync.push(result.ajaxID);
+                            this.__setObj(id, obj);
                         }
                     }
                     $.extend(this.__content['json'], content);
@@ -1488,7 +1489,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 var data = ['put', 'post', 'patch'].indexOf(result.request.type.toLowerCase()) != -1 ?
                                 response || result.request.data
                                 : response;
-                this.__updateContent(data, jqXHR.getResponseHeader('Content-Type'), false, settings);
+                this.__updateContent(data, jqXHR.getResponseHeader('Content-Type'), false, settings, result);
                 // replacing/updating __syncedContent
                 //$this.__syncContent(data, result.request.type.toLowerCase() == 'put' ? true : false);
                 this.__checkContent();
