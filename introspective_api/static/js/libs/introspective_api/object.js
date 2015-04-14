@@ -1765,10 +1765,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __replaceWith: function(resource){
             if (resource && resource !== this) {
+                // this should rather throw an error, than that:
+                //if (this._replaced_with) {
+                //    return this._replaced_with.__replaceWith(resource);
+                //}
                 this.__trigger('replaced', [resource]);
-                // this is ugly, but right now i need this in a framework, that seems to have no chance
-                // to catch the event for one use case..
-                this._replaced_with = resource; 
+                //replaceWith should automatically call the handlers of replaced objects get, load, É with new object.
+
+                this._replaced_with = resource;
             }// todo: if resource === null: blank
             return this
         },
