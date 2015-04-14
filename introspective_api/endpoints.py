@@ -4,6 +4,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.views.generic import View as ViewClass
 from introspective_api.views import APIView, RedirectView, EndpointView
 from introspective_api.settings import api_settings
+from introspective_api.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 
 ApiResponse = api_settings.API_RESPONSE_CLASS
 
@@ -94,7 +95,7 @@ class ApiEndpointMixin(object):
         @brief an endpoint can be deactivated explicitly, if not done when it was registered
         """
         self._endpoint_registry[name] = False
-    """
+
     def get_or_register_endpoint(self, *args, **kwargs):
         try:
             return self.register_endpoint(*args, **kwargs)
@@ -106,7 +107,45 @@ class ApiEndpointMixin(object):
             # TODO: filter correct endpoint by config...
             return self._endpoints[name][0]
         raise Exception('Endpoint "%s" not found' % name)
-    """
+
+    def register_resource(self, name, model, **config):
+        get_detail_view = lambda endpoint: endpoint._endpoints.values()[0][0] if getattr(endpoint, '_shadow', False) else endpoint
+        if getattr(self, '_shadow', False):
+            return get_detail_view(self).register_resource(name, model, **config)
+
+        endpoints = {}
+        config['view_config'] = {
+            'base_view': ListCreateAPIView,
+            'model': model
+        }
+        endpoints['list'] = self.register_endpoint(name, **config)
+        setattr(endpoints['list'], '_shadow', True)
+        self.parent.links[name] = endpoints['list']
+
+        if 'target' in config:
+            target_name, target_endpoint = config['target']
+            target_endpoint = get_detail_view(target_endpoint)
+
+            self.links[target_name] = target_endpoint
+            self.parent.links[target_name] = target_endpoint
+
+            # TODO:? register redirect for sitemap
+            #endpoints['detail'] = endpoints['list'].register_redirect(target_name, target_endpoint)
+        else:
+            config['view_config'] = {
+                'base_view': RetrieveUpdateDestroyAPIView,
+                'model': model
+            }
+            endpoints['detail'] = endpoints['list'].register_selector('id', '[a-zA-Z0-9-_]*', **config)
+
+        if 'link' in config:
+            link_name, link_endpoint = config['link']
+            link_endpoint = get_detail_view(link_endpoint)
+
+            self.links[link_name] = link_endpoint
+            self.parent.links[link_name] = link_endpoint
+
+        return endpoints['list']
 
     def register_endpoint(self, name, **config):
         """
@@ -434,6 +473,8 @@ class ApiEndpoint(ApiEndpointMixin):
             if isinstance(endpoint, basestring):
                 filter_kwargs.update(lookup_field(self, request, *args, **kwargs))
             else:
+                if getattr(endpoint, '_shadow', False):
+                    continue  # TODO: why is this needed. seems to come from register_resource(link=('', endpoint))
                 for endpoint_lookup_field, endpoint_lookup_value in endpoint._get_object_data(request, args, kwargs, complete).iteritems():
                     lookup_field = '%s__%s' % (lookup_field, endpoint_lookup_field) if complete else lookup_field
 
