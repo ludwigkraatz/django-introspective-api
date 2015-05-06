@@ -1,4 +1,22 @@
 define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', 'hawk'], function ($, ApiObject, _log, JSON2) {
+    
+    function ApiClientEvent() {
+        this.init.apply(this, arguments)
+    }
+    $.extend(ApiClientEvent.prototype, {
+        init: function(name){
+            this.name = name;
+        }
+    });
+    var apiClientEvents = {
+        
+        // callback(event, id)
+        'completed': {
+            'succeeded': {},
+            'failed': {},
+        },
+    }
+
     function ApiClient() {
         this.init.apply(this, arguments);
     };
@@ -335,6 +353,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
     
     
         init: function(settings){
+            this.__event_handler = {};
             var tmp = settings.endpoint.split('://');
             if (tmp.length == 1) {
                 tmp = tmp[0];
@@ -602,6 +621,58 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         get_queue:function(){
             return this.queue
         },
+        
+    
+        /*
+         * event handler for triggering
+         */
+        __trigger: function (event_name, args) {
+            var event = new ApiClientEvent(event_name);
+            var event_args = new Array();
+
+            event_args.push(event);
+            for (var arg in args) {
+                event_args.push(args[arg]);
+            }
+            if (this.__event_handler.hasOwnProperty(event_name)) {
+                for (var i = 0; i < this.__event_handler[event_name].length; ++i) {
+                   try {
+                       this.__event_handler[event_name][i].apply(null, event_args);
+                   } catch (e) {
+                       _log(this.__log, 'error', ['could not execute event "'+ event_name +'"', event, 'callback:', this.__event_handler[event_name][i], 'got error:', e])
+                   }
+                }
+            }
+        },
+        
+        __bind: function (event, callback) {
+            var $this = this;
+            if (event.slice(-1) == '*') {
+                var event_prefix = event.slice(0,event.length-1),
+                    prefix_length = event_prefix.length;
+                if (apiClientEvents.hasOwnProperty(event_prefix)) {
+                    this.__bind(event_prefix, callback);
+                    function onChildren(container, __event) {
+                        for (var _event in container[__event]){
+                            $this.__bind(_event, callback);
+                            onChildren(container[__event], _event);
+                        }
+                    }
+                    onChildren(apiClientEvents, event_prefix)
+                }else{
+                    for (var _event in apiObjectEvents) {
+                        if (event_prefix == _event.slice(0, prefix_length)) {
+                           this.__bind(_event, callback)
+                        }
+                    }
+                }
+            }else{
+                if (!this.__event_handler.hasOwnProperty(event)) {
+                    this.__event_handler[event] = [];
+                }
+                this.__event_handler[event].push(callback);
+            }
+        },
     
         /*
          * function that is a wrapper to do some organizational stuff for queued_ajax and afterwards the complete function of the ajax request
@@ -653,6 +724,8 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 if (method != undefined){
                     method(error, statusText, jqXHR)
                 }
+                
+                this.__trigger('failed', [id]);
                 return apiClient._complete(id);
             }            
         },
@@ -680,6 +753,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                     if (method != undefined){
                         method(response, statusText, jqXHR)
                     }
+                    this.__trigger('succeeded', [id]);
                     return apiClient._complete(id);
                     
                 }else{                
@@ -874,6 +948,9 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         access: function(target, callback){            
             var obj = new ApiObject({apiClient:this, target:target});
             return obj.__onGet(true)
+        },
+        bind: function(){
+            this.__bind.apply(this, arguments)
         },
         
         load: function(target, callback){            
