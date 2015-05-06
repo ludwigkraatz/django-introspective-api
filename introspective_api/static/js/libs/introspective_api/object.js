@@ -2246,6 +2246,13 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     };
     
     $.extend(LinkedResource.prototype, ApiObject.prototype);
+    $.extend(LinkedResource.prototype, {
+        __update_info: function(){
+            ApiObject.prototype.__update_info.apply(this, arguments)
+            this.__info.is_resource = true;
+            this.__info.is_relationship = false;
+        }
+    })
     
     
     function ApiPlaceholder() {
@@ -2273,6 +2280,12 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             // after syncContent might have been initialized with original array,
             // hack the array
             this.__initArray(settings.initialContent);
+        },
+        
+        __update_info: function(){
+            ApiObject.prototype.__update_info.apply(this, arguments)
+            this.__info.is_resource = false;
+            this.__info.is_relationship = true;
         },
         
         __initArray: function(arr){
