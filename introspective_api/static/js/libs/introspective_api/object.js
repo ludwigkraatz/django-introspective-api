@@ -1518,20 +1518,25 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
             if (dataType.indexOf('json') != -1) {
                 if (content instanceof Array) {
-                    for (var entry in content) {
-                        // todo: first check storage for cached instance
-                        var obj = new ApiObject({apiClient: this.__apiClient, parent: this, target: null, data: content[entry], asClone:true, log:log});
-                        obj.__updateContent(content[entry], dataType, uncommitted, settings);
-                        obj.__initialized = true;
-                        obj.__trigger('initialized', []);
-                        var id = obj.__getID();
-                        if (id) {
-                            // TODO: because introspective api requires UUID, maybe rather use a global __objects storage
-                            if (result)obj.__sync.push(result.ajaxID);
-                            this.__setObj(id, obj);
+                    if (this.__info.is_resource) {
+                        this.__content['json'] = content;
+                    }else{
+                        for (var entry in content) {
+                            // todo: first check storage for cached instance
+                            var obj = new ApiObject({apiClient: this.__apiClient, parent: this, target: null, data: content[entry], asClone:true, log:log});
+                            obj.__updateContent(content[entry], dataType, uncommitted, settings);
+                            obj.__initialized = true;
+                            obj.__initializing = undefined;
+                            obj.__trigger('initialized', []);
+                            var id = obj.__getID();
+                            if (id) {
+                                // TODO: because introspective api requires UUID, maybe rather use a global __objects storage
+                                if (result)obj.__sync.push(result.ajaxID);
+                                this.__setObj(id, obj);
+                            }
                         }
+                        $.extend(this.__content['json'], content);
                     }
-                    $.extend(this.__content['json'], content);
                 }else if (content instanceof Object) {/*
                     for (var entry in content) {
                         var obj = this.__get(entry);
@@ -1622,21 +1627,22 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     this.__updateContent(data, jqXHR.getResponseHeader('Content-Type'), false, settings, result);
                 // replacing/updating __syncedContent
                 //$this.__syncContent(data, result.request.type.toLowerCase() == 'put' ? true : false);
-                this.__checkContent();
+                    this.__checkContent();
                 
-                // todo store as AttibuteObjects
-                /*if (isLink) {
-                    $.extend($this['objects'], response)
-                }else{
-                    $.extend($this['content'], response);
-                }        */                           
-                
+                    // todo store as AttibuteObjects
+                    /*if (isLink) {
+                        $.extend($this['objects'], response)
+                    }else{
+                        $.extend($this['content'], response);
+                    }        */     
 
-                if (!$this.__initialized) {
-                    $this.__initialized = true;
-                    $this.__trigger('initialized', [result])
-                    $this.__initializing = undefined;
-                }
+                    if (!$this.__initialized || $this.__initializing) {
+                        $this.__initialized = true;
+                        $this.__trigger('initialized', [result])
+                        $this.__initializing = undefined;
+                    }
+                }                      
+                
             }     
             if (result.request.type.toLowerCase() == 'post') {
                 var location = jqXHR.getResponseHeader('Location');
