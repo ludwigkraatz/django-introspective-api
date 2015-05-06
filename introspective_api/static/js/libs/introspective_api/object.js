@@ -687,7 +687,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     if ($this.__objects[target].needsSave()){
                         $this.__objects[target].save();
                     }
-                }else{
+                }else if (target == '.'){
+                    data = $this.__uncommitted[target];
+                    saveObject = true;
+                    values.push(target);
+                }else {
                     data[target] = $this.__uncommitted[target];
                     saveObject = true;
                     values.push(target);
@@ -981,14 +985,19 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         // metadata might have changed. check.
                         this.__discover(function(){ // TODO: discover - o get not just the links with value, but all possible
                             for (var targetID in $this.__unevaluatedObjectsObject) {
-                                $this.__resolveObj(targetID, $this.__unevaluatedObjectsObject[targetID]);
+                                var __settings = $this.__unevaluatedObjectsObject[targetID];
+                                delete $this.__unevaluatedObjects[targetID];
+                                targetID = $this.__parseTarget(__settings.target, __settings.data)
+                                $this.__resolveObj(targetID, __settings);
                             }
                         }); // TODO: force: true
                     } else{
                         delete $this.__unevaluatedObjects[targetID];
                     }
                 }
-                this.__setObj(targetID, obj);
+                if (!obj.__isBlank()) {
+                    this.__setObj(targetID, obj);
+                }
                 this.__trigger('accessed-' + accessType, [obj])
             }
             _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(resolveObject)', 'resolving', targetID, 'and', settings, 'from', this, 'to', obj, '(links: ', $.extend({}, this.__links),')'])
