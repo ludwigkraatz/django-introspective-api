@@ -610,12 +610,21 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __checkContent: function(_target){
-            for (var target in this.__content['json']) {
-                if (_target && _target !== target) {
-                    continue
+            
+            if (this.__content['json'].constructor === Array && this.__info.is_resource) {
+                // TODO - what should be done in case the resource is an array
+                if (JSON.stringify(this.__syncedContent['json']) !== JSON.stringify(this.__content['json'])) {
+                    //this.__updateContent(this.__content['json'], 'json', true);
+                    this.__uncommitted['.'] = this.__content['json']
                 }
-                if (JSON.stringify(this.__syncedContent['json'][target]) !== JSON.stringify(this.__content['json'][target])) {
-                    this.__update(target, this.__content['json'][target]);
+            }else{
+                for (var target in this.__content['json']) {
+                    if (_target && _target !== target) {
+                        continue
+                    }
+                    if (JSON.stringify(this.__syncedContent['json'][target]) !== JSON.stringify(this.__content['json'][target])) {
+                        this.__update(target, this.__content['json'][target]);
+                    }
                 }
             }
             if (this.__uncommitted.length === 0 && this.__syncedContent['json'].length == this.__content['json'].length) {
@@ -1504,14 +1513,28 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
             if (settings.replace) { // TODO: this is no replacement...
                 if (format == 'json') {
-                    for (var target in this.__content[format]){
-                        if (!content || !content.hasOwnProperty(target)) {
-                            this.__update(target, undefined, uncommitted)
+                    if (this.__content[format].constructor === Array && this.__info.is_resource) {
+                        if (!content) {
+                            this.__update(content, uncommitted)
                         }
-                    }
-                    if (!uncommitted) { // do it again for synced content TODO: really?
-                        for (var target in this.__syncedContent[format]){
-                            delete this.__syncedContent[format][target];
+                        if (!uncommitted) { // do it again for synced content TODO: really?
+                            this.__syncedContent[format] = [];
+                        }
+                    }else{
+                        for (var target in this.__content[format]){
+                            if (!content || !content.hasOwnProperty(target)) {
+                                this.__update(target, undefined, uncommitted)
+                            }
+                        }
+                        if (!uncommitted) { // do it again for synced content TODO: really?
+                            for (var target in this.__syncedContent[format]){
+                                delete this.__syncedContent[format][target];
+                            }
+                            /*for (var target in content){//this.__syncedContent[format]){
+                                //if (!content.hasOwnProperty(target)) {
+                                    this.__update(target, undefined, false)
+                                //}
+                            }*/
                         }
                     }
                 }
@@ -1702,8 +1725,21 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
         },
         
-        __updateArray: function(){
-            throw Error('use LinkedRelationship therefore');
+        __updateArray: function(value, uncommitted, replace){
+            var $this = this;
+            if (!this.__info.is_resource) {
+                throw Error('handle relationships in LinkedRelationship')
+            }
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(update)', 'update resource as array', value, uncommitted, replace])
+            
+            if (!uncommitted) {
+                var arr = [];
+                for (var index in this.__content['json']) {
+                    arr.push(this.__content['json'][index])
+                }
+                $this.__syncedContent['json'] = arr;
+            }
+            // TODO: this.__trigger('updated', [value]) or smth
         },
         __updateObject: function(target, value, uncommitted, replace){
             var $this = this,
@@ -2341,32 +2377,41 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __checkContent: function(_target){
             _target = _target !== undefined ? parseInt(_target) : undefined;
-            for (var target in this.__content['json']) {
-                var origTarget = target;
-                target = parseInt(target);
-                if (_target && _target !== target) {
-                    continue
+            if (this.__content['json'].constructor === Array && this.__info.is_resource) {
+                if (target !== undefined) {
+                    throw Error('cant check target content on array resource (yet) "' + target + '"')
                 }
-                if (isNaN(target)) {
-                    continue
-                };
-                
-                if (JSON.stringify(this.__syncedContent['json'][target]) !== JSON.stringify(this.__content['json'][target])) {
-                    if (this.__content['json'][target] && this.__content['json'][target].length && this.__content['json'][target][0] == '!') {
-                        continue // dont update temporary entries
+                if (JSON.stringify(this.__syncedContent['json']) !== JSON.stringify(this.__content['json'])) {
+                    this.__update(this.__content['json']);
+                }
+            }else{
+                for (var target in this.__content['json']) {
+                    var origTarget = target;
+                    target = parseInt(target);
+                    if (_target && _target !== target) {
+                        continue
                     }
-                    this.__update(target, this.__content['json'][target]);
+                    if (isNaN(target)) {
+                        continue
+                    };
+                    
+                    if (JSON.stringify(this.__syncedContent['json'][target]) !== JSON.stringify(this.__content['json'][target])) {
+                        if (this.__content['json'][target] && this.__content['json'][target].length && this.__content['json'][target][0] == '!') {
+                            continue // dont update temporary entries
+                        }
+                        this.__update(target, this.__content['json'][target]);
+                    }
                 }
-            }
-            if (this.__uncommitted.length === 0 && this.__syncedContent['json'].length == this.__content['json'].length) {
-                return
-            }
-            for (var target in this.__syncedContent['json']) {
-                if (_target && _target !== target) {
-                    continue
+                if (this.__uncommitted.length === 0 && this.__syncedContent['json'].length == this.__content['json'].length) {
+                    return
                 }
-                if (!this.__content['json'].hasOwnProperty(target) && !this.__uncommitted.hasOwnProperty(target)) {
-                    this.__update(target, null);
+                for (var target in this.__syncedContent['json']) {
+                    if (_target && _target !== target) {
+                        continue
+                    }
+                    if (!this.__content['json'].hasOwnProperty(target) && !this.__uncommitted.hasOwnProperty(target)) {
+                        this.__update(target, null);
+                    }
                 }
             }
         },
