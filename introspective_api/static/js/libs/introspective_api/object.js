@@ -512,20 +512,96 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return obj
         },
         
-        __setURL: function(request, target){
-            var data = {}
-            $.extend(data, this.__unresolvedData);
-            if (request.data) {
-                $.extend(data, request.data);
+        __execute: function(action, data, callback){ // executes an action on resource
+            if (typeof action == 'object' && data === callback === undefined) {
+                data = action.data;
+                callback = action.callback;
+                action = action.action;
+            }
+            var $this = this;
+            var result = this.__asResult('execute', {action:action, data:data, callback:callback}),
+                request = {type:'post'};
+            request.done = function(response, status, jqXHR){
+                $this.__finishedLoading(result);
+                result.registerSuccess(response, status, jqXHR); 
+                //obj.__updateFromResponse(response, result);
+                if (callback instanceof Function) {
+                    callback(result);
+                }
+                $this.__trigger('post-execute', [result]);
+            }
+            request.fail = function(jqXHR, statusText, errorThrown){
+                $this.__finishedLoading(result);
+                result.registerFailure(jqXHR, statusText, errorThrown);
+                if (callback instanceof Function) {
+                    callback(result);
+                }
+                $this.__trigger('post-execute', [result]);
+            }
+            
+            this.__setURL(request, {action: action, data: data});
+            var requestSettings = {log: this.__log};
+            this.__startLoading(result);
+            var ajaxID = this.__apiClient.add(request, requestSettings);
+            result.registerRequest(ajaxID, request);
+            return result
+        },
+        
+        __setURL: function(request, target_or_action){
+            var data = {},
+                target,
+                action_meta,
+                action;
+            if (typeof target_or_action == 'object') {
+                action = target_or_action;
+                action_meta = this.__discovered.actions[action['action']];
+            }else{
+                target = target_or_action;
+            }
+
+            if (action === undefined) {
+                $.extend(data, this.__unresolvedData);
+                if (request.data) {
+                    $.extend(data, request.data);
+                }
+            }else{
+                data = action['data'];
+                if (data === undefined) {
+                    data = {};
+                    for (var attr in action_meta) {
+                        data[attr] = this.__content['json'][attr];
+                        if (action_meta[attr].required && data[attr] === undefined) {
+                            _log(this.__log, 'error', ['missing attribute "' + attr + '" in order to execute "' + action['action'] + '"', this])
+                            throw Error('cannot execute "' + action['action'] + '"')
+                        }
+                    }
+                }
             }
             request.data = data;
             
+            
             var url = this.__asURL(target);
             if (url) {
+                if (action !== undefined) {
+                    if (url.indexOf('?') == -1) {
+                        url += '?';
+                    }else{
+                        url += '&';
+                    }
+                    url += 'action=' + action['action'];
+                }
                 request.url = url
             }else{
                 var uri = this.__asURI(target);
                 if (uri) {
+                    if (action !== undefined) {
+                        if (uri.indexOf('?') == -1) {
+                            uri += '?';
+                        }else{
+                            uri += '&';
+                        }
+                        uri += 'action=' + action['action'];
+                    }
                     request.uri = uri;
                 }else{
                     throw Error('has neither uri nor url');
@@ -797,22 +873,26 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __parseTarget: function(target, data){
-            if (false && target == 'relationship'){ // no longer needed
-                return data[target]
-            }else if (data instanceof Object) {
-                var args = "";
-                for (var entry in data) {
-                    if (this.__links[entry] === undefined || entry != target) {
-                        continue
-                    }
-                    /*args += entry;
-                    args += ':';*/
-                    args += data[entry];
-                    //args += ';';
+            var args = "";
+            if ((this.__links[target] !== undefined) &&
+                      (data instanceof Object)) {
+                // this matches links like target='with_date', data={with_date:20.1.2001} with with_date:/api/by_date/?date={with_date}
+                args += data[target];
+            }else if ((LINK_HEADER_TARGETS.indexOf(target)>=0)
+                    && (data instanceof Object)
+                    && (this.__links[data[target]] !== undefined)) {
+                // this matches target='link', data={link: primary}, with primary: /api/somewhere/?primary
+                args += data[target]
+            }else if ((LINK_HEADER_TARGETS.indexOf(target)>=0) && (this.__links[data])) {
+                // this matches target='link', data='primary', with primary: /api/somewhere/?primary
+                args += data
+            }else if ((LINK_HEADER_TARGETS.indexOf(target)>=0) && (data instanceof Object)) {
+                for (var index in data) {
+                    args += index + ':' + data[index] + ';'
                 }
-                if (args) {
-                    return target + '|' + args
-                }
+            }
+            if (args) {
+                return target + '|' + args
             }
             return target
         },
@@ -1865,6 +1945,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         bind: function(){
             return this.__bind.apply(this, arguments)
+        },
+        
+        execute: function(){
+            return this.__execute.apply(this, arguments)
         },
         
         hasUnsavedChanges: function(){

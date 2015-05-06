@@ -372,10 +372,26 @@ class GenericAPIView(views.APIView):
                 serializer = self.get_serializer()
                 actions[method] = serializer.metadata()
 
+        for name, action in self.get_actions(request).items():
+            actions[name] = action
+
         if actions:
             ret['actions'] = actions
 
         return ret
+
+    def get_actions(self, request):
+        return {}
+
+    def execute(self, request, action, *args, **kwargs):
+        if action not in self.get_actions(request):
+            return self.http_method_not_allowed(request, *args, **kwargs)
+        return api_settings.API_RESPONSE_CLASS(status=404).finalize_for(request)  # TODO
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.method.upper() == 'POST' and 'action' in request.GET:
+            return self.execute(request, request.GET['action'], *args, **kwargs)
+        return super(GenericAPIView, self).dispatch(request, *args, **kwargs)
 
 
 ##########################################################
