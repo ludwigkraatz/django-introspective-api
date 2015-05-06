@@ -2033,6 +2033,16 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         //update: function(){
         //    return this.__update.apply(this, arguments)
         //},
+
+        updateApiClient: function(apiClient){
+            if (this.__apiClient == apiClient) {
+                return false
+            }
+            this.__apiClient = apiClient;
+            if (this.__initialized) {
+                this.refresh({force: true})
+            }
+        },
         
         replaceContent: function(new_content, dataType, uncommitted){
             return this.__replaceContent(new_content, dataType || 'json', uncommitted)
