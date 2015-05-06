@@ -326,7 +326,8 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         
         registerCallbacksForRequest: function(id, callbacks){
             if (this.queue[id] === undefined) {
-                _log(this.__log, 'error', ['id "'+id+'" not found in queue']);
+                _log(this.__log, 'error', [ '[Introspective ApiClient]', 'id "'+id+'" not found in queue']);
+                return false;
                 throw Error('id "'+id+'" not found in queue')
             }
             if (this.queue[id]['callbacks'] === undefined) {
@@ -338,6 +339,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 }
                 this.queue[id]['callbacks'][callback].push(callbacks[callback]);
             }
+            return true
         },
         
         ajax: function(request){
@@ -736,7 +738,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         _getSuccessCallbackHandler: function(id, methodMap) {
             var apiClient = this;
             return function (response, statusText, jqXHR){
-                if (apiClient.queue[id].settings.auth._needsAuthentication != true ||
+                if ((!apiClient.queue[id].settings.auth || apiClient.queue[id].settings.auth._needsAuthentication != true) ||
                     apiClient.queue[id].settings.auth._isAuthenticatedResponse) {
                     
                     var method = apiClient.queue[id].settings.done;
