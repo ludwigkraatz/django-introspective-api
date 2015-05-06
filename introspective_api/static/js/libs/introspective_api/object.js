@@ -1242,11 +1242,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 callbacks.done = function(response, status, jqXHR){
                     result.registerSuccess(response, status, jqXHR);
                     $this.__updateFromResponse(response, result);
-                    settings.callback(result);
+                    if (settings.callback)settings.callback(result);
                 }
                 callbacks.fail = function(jqXHR, statusText, errorThrown){
                     result.registerFailure(jqXHR, statuText, errorThrown);
-                    settings.callback(result);
+                    if (settings.callback)settings.callback(result);
                 }
                 
                 this.__apiClient.registerCallbacksForRequest(this.__discovering, callbacks);
@@ -1254,7 +1254,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }else if (this.__discovered && (settings.forceReload === undefined || settings.forceReload === false)) {
                 //var result = this.__asResult('discover', settings);
                 result.wasCached($this.__discovered);
-                settings.callback(result);
+                if (settings.callback)settings.callback(result);
             }else{
             
                 $this.__startLoading(result);
@@ -1265,6 +1265,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         $this.__discovered = response;
                         $this.__discovering = undefined;
                         result.registerSuccess(response, text, jqXHR);
+                        $this.__updateFromResponse(response, result);
                         if (settings.callback instanceof Function) {
                             settings.callback(result); 
                         }
@@ -1313,6 +1314,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }else if (callbackOrSettings instanceof Object) {
                 $.extend(settings, callbackOrSettings);
             }
+            if (settings.force) {
+                // TODO: deprication warning
+                settings.forceReload = settings.force;
+            }
             
             if (this.__initializing != undefined) {
                 var result = this.__asResult('load', settings);
@@ -1327,9 +1332,16 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 }
                 
                 // TODO: it can happen that the id is completed, the time this method executes! (had this case)
-                this.__apiClient.registerCallbacksForRequest(this.__initializing, callbacks);
+                if (this.__apiClient.registerCallbacksForRequest(this.__initializing, callbacks))
+                    return this;
                 
-            }else if (!settings.format && this.__initialized && (settings.forceReload === undefined || settings.forceReload === false)) {
+                if (this.__initializing) {
+                    _log(this.__log, 'error', ['(introspectiveApi)', '(Object)', 'still initializing but not able to register callbacks'])
+                }
+                
+            }
+            
+            if (!settings.format && (this.__initialized || !$.isEmptyObject(this.__syncedContent['json']))&& (settings.forceReload === undefined || settings.forceReload === false)) {
                 var result = this.__asResult('load', settings);
                 result.wasCached();
                 if (settings.callback) settings.callback(result);
@@ -1361,6 +1373,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             
             if (settings.loadContent === undefined) {
                 settings.loadContent = true;
+            }
+            if (settings.force) {
+                // TODO: deprication warning
+                settings.forceReload = settings.force;
             }
             
             var result = this.__asResult('refresh', settings);
@@ -1497,13 +1513,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         for (var target in this.__syncedContent[format]){
                             delete this.__syncedContent[format][target];
                         }
-                        /*for (var target in content){//this.__syncedContent[format]){
-                            //if (!content.hasOwnProperty(target)) {
-                                this.__update(target, undefined, false)
-                            //}
-                        }*/
                     }
-                    
                 }
             }
             if (dataType.indexOf('json') != -1) {
@@ -1608,7 +1618,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 var data = ['put', 'post', 'patch'].indexOf(result.request.type.toLowerCase()) != -1 ?
                                 response || result.request.data
                                 : response;
-                this.__updateContent(data, jqXHR.getResponseHeader('Content-Type'), false, settings, result);
+                if (result.request.type.toLowerCase() != 'options'){
+                    this.__updateContent(data, jqXHR.getResponseHeader('Content-Type'), false, settings, result);
                 // replacing/updating __syncedContent
                 //$this.__syncContent(data, result.request.type.toLowerCase() == 'put' ? true : false);
                 this.__checkContent();
@@ -1635,6 +1646,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }else if (jqXHR.url) {
                 additionalLinks['.'] = jqXHR.url;
             }
+            _log(settings.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', result, jqXHR.getResponseHeader('Link'), jqXHR.getResponseHeader('Link-Template')])
             $.extend(additionalLinks, parseLinkHeader(jqXHR.getResponseHeader('Link')));
             $.extend(additionalLinks, parseLinkTemplateHeader(jqXHR.getResponseHeader('Link-Template')));
             this.__updateURLLinks(additionalLinks);
@@ -1701,6 +1713,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             if (str_value === str_content === str_orig) {
                 return
             }
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(update)', 'update resource as object', value, uncommitted, replace])
             
             if (!uncommitted){
                 if ($this.__syncedContent['json'].hasOwnProperty(target) && value === undefined) {
@@ -1765,7 +1778,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__loading += 1;
         },
         
-        __getContent: function(){
+        __getContent: function(format){
+            if (format) {
+                return this.__content[format]
+            }
             return this.__content;
         },
         
@@ -2137,7 +2153,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __update: function(newContent){
             var $this = this;
-            if (JSON.stringify(newCOntent) === JSON.stringify(this.__content['json'])) {
+            if (JSON.stringify(newContent) === JSON.stringify(this.__content['json'])) {
                 return
             }
             $this.__updateContent(newContent);
