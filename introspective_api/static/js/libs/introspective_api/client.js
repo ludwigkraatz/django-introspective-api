@@ -34,6 +34,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 3:[],
                 4:[]
         },
+        priotirized: false,
         queue : {},
         dependencies : {},
         is_active : {},
@@ -506,10 +507,12 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 this.priotirized_requests[priority].push(id)
             }
             */
-            if (this.active<this.at_once && priority == 0 && (
+            if ((this.active<this.at_once && priority == 0 && (
                                             this.locked == false
                                         ||  settings.ignoreLock
-                                        )) {
+                                        ))
+                || !this.priotirized
+            ) {
                 this.start(id);
             }else{
                 if (!this.priotirized_requests[priority]){
