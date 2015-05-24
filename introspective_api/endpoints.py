@@ -136,7 +136,8 @@ class ApiEndpointMixin(object):
                 'base_view': RetrieveUpdateDestroyAPIView,
                 'model': model
             }
-            endpoints['detail'] = endpoints['list'].register_selector('id', '[a-zA-Z0-9-_]*', **config)
+            pk_name = model._meta.pk.name
+            endpoints['detail'] = endpoints['list'].register_selector(pk_name, '[a-zA-Z0-9-_]*', **config)
 
         if 'link' in config:
             link_name, link_endpoint = config['link']
