@@ -10,3 +10,7 @@ class HawkAuthorizationRequired(Exception):
 
 class InvalidKey(HawkAuthorizationRequired):
     pass
+
+
+class EndpointNotFound(BaseException):
+    pass

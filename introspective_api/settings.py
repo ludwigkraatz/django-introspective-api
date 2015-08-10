@@ -34,12 +34,23 @@ DEFAULTS = {
     'STATIC_ENDPOINT_FOLDER': (settings.STATIC_ROOT or './')+'js/endpoint/',
         
     'LOG_CLIENT': False,
+
+    'VALID_URL_PATTERNS_EXPR': '[a-zA-Z0-9\/\-$_.+!*\'(),]*',
     
     'PAGINATE_BY_PARAM': 'paginate_by',
     
     'PAGINATION_IN_HEADER': True,
-    'PAGINATION_RANGE_HEADER_TOKEN':
+    'PAGINATION_RANGE_HEADER_TOKEN': [
         'x-records',
+        'x-pages',
+        'x-days'
+    ],
+    'VIEW_TYPE_HEADER': False,
+    'VIEW_TYPE_HEADER_NAME': 'X-ViewType',
+    'VIEW_TYPE_HEADERS': {
+        'LIST': 'List',
+        'DETAIL': 'Detail'
+    },
     
     'DEFAULT_MODEL_SERIALIZER_CLASS':
         'introspective_api.serializers.ModelSerializer',

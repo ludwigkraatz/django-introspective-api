@@ -10,13 +10,7 @@ from rest_framework.response import Response
 from rest_framework.templatetags.rest_framework import replace_query_param
 from rest_framework.mixins import *
 import itertools
-
-
-class CreateModelMixin(CreateModelMixin):
-    def create(self, request, *args, **kwargs):
-        endpoint_filter = self.endpoint.get_object_presets(request, *self.args, **self.kwargs)
-        request.DATA.update(endpoint_filter)
-        return super(CreateModelMixin, self).create(request, *args, **kwargs)
+from introspective_api.views import APIView
 
 
 class ListModelMixin(ListModelMixin):
@@ -105,7 +99,7 @@ class ListModelMixin(ListModelMixin):
 
         if 'HTTP_RANGE' in self.request.META:
             token, result_range = self.request.META['HTTP_RANGE'].split("=")
-            if token == self.settings.PAGINATION_RANGE_HEADER_TOKEN:                
+            if token in self.settings.PAGINATION_RANGE_HEADER_TOKEN:
                 try:
                     ranges = []
                     records_start, records_end = self.parse_range_header(result_range)
@@ -176,33 +170,44 @@ class ListModelMixin(ListModelMixin):
                     serializer = self.get_pagination_serializer(page)
             else:
                 serializer = self.get_serializer(self.object_list, many=True)
-                
-                headers['Accept-Ranges'] = self.settings.PAGINATION_RANGE_HEADER_TOKEN
+                self.patchRangesHeader(headers)
     
         if partial_content:
             status_code = status.HTTP_206_PARTIAL_CONTENT
+            range_token = self.settings.PAGINATION_RANGE_HEADER_TOKEN[0]  # TODO: from request
             
             # currently just 1 range processable
             cur_range = ranges[0]
             
             headers['Content-Range'] = '%(token)s %(records_start)d-%(records_end)d/%(records_count)d' % {
-                                'token': self.settings.PAGINATION_RANGE_HEADER_TOKEN,
+                                'token': range_token,
                                 'records_count': records_count,
                                 'records_start': cur_range[0] or 0,
                                 'records_end': min((cur_range[1] - 1) if cur_range[1] is not None else records_count,records_count-1),
                             }
-            headers['Accept-Ranges'] = self.settings.PAGINATION_RANGE_HEADER_TOKEN
+            self.patchRangesHeader(headers)
             
         headers.update(self.get_response_headers(request, status_code, serializer=serializer))
         return Response(serializer.data, status=status_code, headers=headers)
+
+    def get_response_headers(self, request, *args, **kwargs):
+        headers = super(ListModelMixin, self).get_response_headers(request, *args, **kwargs)
+        self.patchRangesHeader(headers)
+        return headers
+
+    def patchRangesHeader(self, headers):
+        headers['Accept-Ranges'] = ','.join(self.settings.PAGINATION_RANGE_HEADER_TOKEN)
     
     def get_paginate_by(self,object_list):
         return int(self.request.GET.get('pagesize',super(ListModelMixin,self).get_paginate_by(object_list)) or 0)
     
-    def metadata(self, request):
+    def metadata2(self, request):
         metadata = super(ListModelMixin,self).metadata(request)
         if not 'Accept-Ranges' in metadata:
             metadata['Accept-Ranges'] = []
-        if not self.settings.PAGINATION_RANGE_HEADER_TOKEN in metadata['Accept-Ranges']:
-            metadata['Accept-Ranges'].append(self.settings.PAGINATION_RANGE_HEADER_TOKEN)
+        for token in self.settings.PAGINATION_RANGE_HEADER_TOKEN:
+            if token in metadata['Accept-Ranges']:
+                continue
+            metadata['Accept-Ranges'].append(token)
         return metadata
+

@@ -6,7 +6,7 @@ define([], function () {
         if (! args instanceof Array) {
             args = [args]
         }
-        if (!log) {
+        if (!log || log === console) {
             log = console;
             use_console = true;
         }

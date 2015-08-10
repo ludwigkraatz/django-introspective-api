@@ -5,18 +5,15 @@ from django.views.generic import View as ViewClass
 from introspective_api.views import APIView, RedirectView, EndpointView
 from introspective_api.settings import api_settings
 from introspective_api.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
+from introspective_api.exceptions import EndpointNotFound
+from introspective_api.filter import EndpointFilterBackend
 
 ApiResponse = api_settings.API_RESPONSE_CLASS
 
 from django.conf import settings
 
 import copy
-
-
-class EndpointFilterBackend(object):
-    def filter_queryset(self, request, queryset, view):
-        endpoint_filter = view.endpoint.get_object_filter(request, *view.args, **view.kwargs)
-        return queryset.filter(**endpoint_filter)
+from functools import partial
 
 
 class ApiEndpointMixin(object):
@@ -33,13 +30,23 @@ class ApiEndpointMixin(object):
         self.type       = config.pop('type', None)
         self.namespace  = config.pop('namespace', None)
         self.app_name   = config.pop('app_name', None)
+        self.config     = config
+
+    def is_restricted(self, ):
+        return self.config.get('is_restricted', True)
+
+    def only_authenticated(self, ):
+        return self.config.get('require_auth', True)
+
+    def require_ssl(self, ):
+        return self.config.get('ssl', True)
 
     def get_complete_namespace(self, post_fix=False, regular=False):
         """
         @brief concats the namespaces from this and all parent endpoints
         """
         seperator = '.' if not regular else ':'
-        namespace = (self.namespace or '') + ('' if regular or not self.app_name else ((seperator if self.namespace else '' ) + self.app_name))
+        namespace = (self.namespace or '') + ('' if regular or not self.app_name else ((seperator if self.namespace else '' ) + (self.app_name or '')))
         parent_namespace = (self.parent or self.root).get_complete_namespace(regular=regular)
 
         if parent_namespace and namespace:
@@ -54,6 +61,20 @@ class ApiEndpointMixin(object):
             return namespace + (seperator if post_fix else '')
         else:
             return None
+
+    def get_complete_view_name(self, post_fix=False, regular=False):
+        """
+        @brief concats the namespaces from this and all parent endpoints
+        """
+        seperator = '.' if not regular else ':'
+        namespace = self.get_complete_namespace(regular=regular)
+        view_name = self.view_name
+        if not view_name:
+            raise Exception('no view name defined')
+
+        if view_name and namespace:
+            return seperator.join((namespace, view_name))
+        return view_name
 
     def get_complete_app_name(self, post_fix=False):
         """
@@ -106,47 +127,58 @@ class ApiEndpointMixin(object):
         if name in self._endpoints:
             # TODO: filter correct endpoint by config...
             return self._endpoints[name][0]
-        raise Exception('Endpoint "%s" not found' % name)
+        raise EndpointNotFound('Endpoint "%s" not found' % name)
 
     def register_resource(self, name, model, **config):
         get_detail_view = lambda endpoint: endpoint._endpoints.values()[0][0] if getattr(endpoint, '_shadow', False) else endpoint
         if getattr(self, '_shadow', False):
             return get_detail_view(self).register_resource(name, model, **config)
+        config['model'] = model
+        serializer_model = config.get('serializer_model', model)
+        view_name = config.pop('view_name', model.__class__.__name__)
 
         endpoints = {}
         config['view_config'] = {
-            'base_view': ListCreateAPIView,
+            'base_view': config.get('list_view', ListCreateAPIView),
             'model': model
         }
+        config['view_name'] = 'ResourceEndpoint-' + view_name + '-list'
         endpoints['list'] = self.register_endpoint(name, **config)
         setattr(endpoints['list'], '_shadow', True)
-        self.parent.links[name] = endpoints['list']
+        if self.parent and self.parent.links:
+            self.parent.links[name] = endpoints['list']
 
         if 'target' in config:
             target_name, target_endpoint = config['target']
             target_endpoint = get_detail_view(target_endpoint)
 
             self.links[target_name] = target_endpoint
-            self.parent.links[target_name] = target_endpoint
+            if self.parent and self.parent.links:
+                self.parent.links[target_name] = target_endpoint
 
             # TODO:? register redirect for sitemap
             #endpoints['detail'] = endpoints['list'].register_redirect(target_name, target_endpoint)
         else:
             config['view_config'] = {
-                'base_view': RetrieveUpdateDestroyAPIView,
+                'base_view': config.get('detail_view', RetrieveUpdateDestroyAPIView),
                 'model': model
             }
-            pk_name = model._meta.pk.name
-            endpoints['detail'] = endpoints['list'].register_selector(pk_name, '[a-zA-Z0-9-_]*', **config)
+            config['view_name'] = 'ResourceEndpoint-' + view_name + '-detail'
+            selector = config.get('detail_selector', model._meta.pk.name)
+            selector_expr = config.get('detail_selector_expr', '[a-zA-Z0-9\-$_.+!*\'(),]*')
+            endpoints['detail'] = endpoints['list'].register_selector(selector, selector_expr, **config)
 
-        if 'link' in config:
+            if endpoints['detail'].model and not hasattr(endpoints['detail'].model, '_api_endpoint_detail'):
+                endpoints['detail'].model._api_endpoint_detail = endpoints['detail']
+
+        if 'link' in config:# and False:
             link_name, link_endpoint = config['link']
             link_endpoint = get_detail_view(link_endpoint)
-
             self.links[link_name] = link_endpoint
-            self.parent.links[link_name] = link_endpoint
+            if self.parent and self.parent.links:
+                self.parent.links[link_name] = link_endpoint
 
-        return endpoints['list']
+        return endpoints
 
     def register_endpoint(self, name, **config):
         """
@@ -294,11 +326,63 @@ class ApiEndpointMixin(object):
 
         return self
 
+    @classmethod
+    def default_auto_serializer(cls, serializer_model, **kwargs):
+        from . import serializers
+        #if hasattr(serializer_model, '_api_endpoint'):  # TODO: _api_endpoint should be set somewhere!
+        #    for name, endpoint in serializer_model._api_endpoint.links.items():
+        #        print name
+        class AutoSerializer(serializers.ModelSerializer):
+            _options_class = serializers.HyperlinkedModelSerializerOptions
+            class Meta:
+                model       =   serializer_model
+
+        return AutoSerializer
+
+    @classmethod
+    def generate_auto_view(cls, api_root, view_config, endpoint_links, **kwargs):
+        view_model = view_config.get('model')
+        base_view = view_config.get('base_view')
+        serializer_model = kwargs.get('serializer_model', view_model)
+
+        class AutoView(base_view):
+            serializer_class = kwargs.get('serializer_cls', None) or cls.default_auto_serializer(serializer_model=serializer_model)
+            model = view_model
+
+            def get_serializer_class(self):
+                if hasattr(self, 'endpoint') and hasattr(self.endpoint, 'generate_auto_serializer'):
+                    return self.endpoint.generate_auto_serializer(serializer_model=serializer_model, view=self)
+                return super(AutoView, self).get_serializer_class()
+
+            def get_response_headers(self, *args, **kwargs):
+                headers = super(AutoView, self).get_response_headers(*args, **kwargs)
+                for name, endpoint in endpoint_links.items():
+                    link_name = name
+                    link_url = '/' + api_root.as_url(absolute=True) + endpoint.as_sitemap_url(absolute=True, with_name=name) + '/'  # TODO: this slash - fix is ... - also: why isnt it absolute?!
+                    if '{' not in link_url:
+                        self.add_link_header(headers,
+                                              name=link_name,
+                                              url=link_url
+                                              )
+                    else:
+                        self.add_link_template_header(
+                                headers,
+                                name=link_name,
+                                url=link_url
+                                )
+                return headers
+
+        AutoView.__name__ = view_model.__name__
+        #AutoView.__doc__ = view_model.__doc__ #TODO
+
+        return AutoView
+
     def _register_endpoint(self, name, **config):
         """
         @brief the actual registering of an endpoint is done here.
         TODO: register_endpoint might be obsolete
         """
+
         if self.type == self.REDIRECT_ENDPOINT:
             raise ImproperlyConfigured, 'redirect Endpoint "%s" can not register endpoints' % self.name
 
@@ -308,53 +392,27 @@ class ApiEndpointMixin(object):
             if (any(endpoint.pattern == config.get('pattern') for endpoint in self._endpoints[name])):
                 raise ImproperlyConfigured, 'filtered Endpoint "%s" with pattern "%s" found twice' % (self.name, config.get('pattern'))
 
+        EndpointClass = config.pop('endpoint_class', ApiEndpoint)
 
         if type(config.get('view')) == type(ViewClass):
             config['view_class'] = config.pop('view')
 
         elif config.get('view_config'):
             view_config = config.get('view_config')
-            view_model = view_config.get('model')
-            endpoint_links = self.links
-            api_root = self.root
+            config['view_class'] = EndpointClass.generate_auto_view(
+                serializer_cls=view_config.get('serializer_class', None),
+                serializer_model=config.get('serializer_model', config.get('model', None)),
+                api_root=self.root,
+                view_config=view_config,
+                endpoint_links=self.links
+            )
 
-            from . import serializers
-            class AutoSerializer(serializers.ModelSerializer):
-                _options_class = serializers.HyperlinkedModelSerializerOptions
-                class Meta:
-                    model       =   view_model
-
-            class AutoView(view_config.get('base_view')):
-                serializer_class = AutoSerializer
-                model = view_model
-                def get_response_headers(self, *args, **kwargs):
-                    headers = super(AutoView, self).get_response_headers(*args, **kwargs)
-                    for name, endpoint in endpoint_links.items():
-                        link_name = name
-                        link_url = '/' + api_root.as_url(absolute=True) + endpoint.as_sitemap_url(absolute=True, with_name=name) + '/'  # TODO: this slash - fix is ... - also: why isnt it absolute?!
-                        if '{' not in link_url:
-                            self.add_link_header(headers,
-                                                  name=link_name,
-                                                  url=link_url
-                                                  )
-                        else:
-                            self.add_link_template_header(
-                                    headers,
-                                    name=link_name,
-                                    url=link_url
-                                    )
-                    return headers
-
-            AutoView.__name__ = view_model.__name__
-            #AutoView.__doc__ = view_model.__doc__ #TODO
-
-            config['view_class'] = AutoView
-
+        if 'view_class' in config and getattr(config['view_class'], 'use_endpoint_filter', False):
             if not hasattr(config['view_class'], 'filter_backends'):
                 config['view_class'].filter_backends = ()
             config['view_class'].filter_backends += (EndpointFilterBackend, )
 
-        endpoint = ApiEndpoint(
+        endpoint = EndpointClass(
                         name=name,
                         **config
                     )
@@ -390,6 +448,7 @@ class ApiEndpoint(ApiEndpointMixin):
         self.view_class         = config.pop('view_class', None)
         self.view_config        = config.pop('view_config', {})
         self.view               = config.pop('view', None)
+        self._model             = config.pop('model', None)
 
         self.target_endpoint    = config.pop('target_endpoint', None)
         self.redirect_lookup    = config.pop('redirect_lookup', None)
@@ -400,9 +459,16 @@ class ApiEndpoint(ApiEndpointMixin):
         self.lookup_fields      = config.pop('lookup_fields', {})
         self.depends_on         = config.pop('depends_on', {})
 
-        self.config             = config
-
         super(ApiEndpoint, self).__init__(**config)
+
+    @property
+    def model(self):
+        if self._model:
+            return self._model
+        elif self.view_config and 'model' in self.view_config:
+            return self.view_config.get('model')
+        else:
+            return None
 
     def has_url(self, ):
         """
@@ -423,7 +489,7 @@ class ApiEndpoint(ApiEndpointMixin):
             self.lookup_fields[self.parent] = parent_field
 
         if self.type in [self.FILTER_ENDPOINT, self.SELECTOR_ENDPOINT]:
-            self.lookup_fields['self'] = lambda endpoint, request, *args, **kwargs: {endpoint.get_fitlers_field_name(): kwargs.get(endpoint.get_name(), None)}
+            self.lookup_fields['self'] = self.as_lookup_field
 
         #user_field              = config.pop('user_field', None)
         #if user_field:
@@ -448,6 +514,10 @@ class ApiEndpoint(ApiEndpointMixin):
                         setattr(self.view_class, 'lookup_field', lookup_field)
 
                 self.view           = self.view_class.as_view(**kwargs)
+        
+        if self.model:
+            if not hasattr(self.model, '_api_endpoint'):
+                self.model._api_endpoint = self
 
     def get_object_filter(self, request, *args, **kwargs):
         """
@@ -472,14 +542,14 @@ class ApiEndpoint(ApiEndpointMixin):
         for endpoint, lookup_field in self.lookup_fields.items():
 
             if isinstance(endpoint, basestring):
-                filter_kwargs.update(lookup_field(self, request, *args, **kwargs))
+                field = lookup_field(endpoint=self, endpoint_name=endpoint, request=request, view_kwargs=kwargs)
+                filter_kwargs.update(field)
             else:
                 if getattr(endpoint, '_shadow', False):
                     continue  # TODO: why is this needed. seems to come from register_resource(link=('', endpoint))
                 for endpoint_lookup_field, endpoint_lookup_value in endpoint._get_object_data(request, args, kwargs, complete).iteritems():
-                    lookup_field = '%s__%s' % (lookup_field, endpoint_lookup_field) if complete else lookup_field
-
-                    filter_kwargs[lookup_field]    = endpoint_lookup_value
+                    fixed_lookup_field = '%s__%s' % (lookup_field, endpoint_lookup_field) if complete else lookup_field
+                    filter_kwargs[fixed_lookup_field]    = endpoint_lookup_value
 
         return filter_kwargs
 
@@ -534,14 +604,17 @@ class ApiEndpoint(ApiEndpointMixin):
                 **kwargs
             )
 
-    def get_fitlers_field_name(self, ):
+    def as_lookup_field(self, view_kwargs, **kwargs):
+        return {self.get_filters_field_name(): view_kwargs.get(self.get_name(), None)}
+
+    def get_filters_field_name(self, ):
         """
         @brief the filters field name is the field part of this endpoints name.
         if the endpoints name is not in the *model__field* syntax, it just returns the name
         """
         return self.name.split('__')[-1] if '__' in self.name else self.name
 
-    def get_fitlers_object_name(self, ):
+    def get_filters_object_name(self, ):
         """
         @brief the filters object name is the model part of this endpoints name.
         if the endpoints name is not in the *model__field* syntax, it just returns the name
@@ -557,7 +630,7 @@ class ApiEndpoint(ApiEndpointMixin):
         # should be aware of type and react accordingly
         if not for_sitemap:
             return self.name
-        return self.get_fitlers_object_name()
+        return self.get_filters_object_name()
 
 
     def as_sitemap_url(self, absolute=False, python_formatting=False, with_name=None):
@@ -569,7 +642,7 @@ class ApiEndpoint(ApiEndpointMixin):
 
             if not python_formatting:
                 # href - LINK Template formatting
-                url = '{%s}' % (with_name or self.get_fitlers_field_name())
+                url = '{%s}' % (with_name or self.get_filters_field_name())
                     #self.get_name(for_sitemap=True)
             else:
                 url = '%(' + ('%s)s' % (with_name or self.name))
@@ -713,6 +786,19 @@ class APIRoot(ApiEndpointMixin, APIView):
         ret = ret.data
 
         ret.update(api_root.generate_sitemap(version))
+        if api_root.has_endpoints():
+            endpoints = {}
+            for endpoint in api_root.list_endpoints():
+                if not endpoint.is_active():
+                    continue
+                endpoints[endpoint.as_url(absolute=True)] = dict(
+                    restricted=endpoint.is_restricted(),
+                    authenticated=endpoint.only_authenticated(),
+                    require_ssl=endpoint.require_ssl(),
+                    name=endpoint.get_name()
+                )
+            if endpoints:
+                ret['endpoints'] = endpoints
         #ret['sitemap'] = api_root.generate_sitemap(version)
 
         return ApiResponse(
@@ -783,7 +869,7 @@ class APIRoot(ApiEndpointMixin, APIView):
                 if endpoint.is_active():
                     endpoint_sitemap = endpoint.as_sitemap()
                     if endpoint_sitemap is not None:
-                        sitemap['links'][endpoint.name] = endpoint_sitemap
+                        sitemap['links'][endpoint.get_name(for_sitemap=True)] = endpoint_sitemap
         else:
             return {}
 

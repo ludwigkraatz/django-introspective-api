@@ -1,12 +1,34 @@
 define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
+    var resources;
     LINK_HEADER_TARGETS = ['link', 'relationship']
-    function unpackURL(url, data) {        
+    function unpackURL(url, data, resource) {
         if (url.indexOf('{') != -1){
+            var id_attrs = [];
+            if (resource) {
+                if ((!data || $.isEmptyObject(data))) {
+                    data = {};
+                    $.extend(data, resource.__syncedContent, resource.__data);
+                }
+                
+                id_attrs = resource.__info.id_attrs;
+            }
+            
+            if (data['self']) {
+                $.each(id_attrs, function(index, name){
+                    if (!data[name]) {
+                        data[name] = data['self'];
+                    }
+                })
+            }
             for (var substitut in data) {
                 if (data[substitut] != undefined) {
                     url = url.replace('{' + substitut + '}', data[substitut]);
                 }                    
             }   
+        }
+        if (url.indexOf('{') != -1){
+            console.log(data, resource);
+            throw Error('couldnt resolve url template: ' + url)
         }
         return url
     }
@@ -50,14 +72,20 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         // callback(event, apiResult)
         'initialized': {},
         'post-save': {},
+        'failed-save': {},
         //'post-save-related': {},
         'post-add': {},
+        'failed-add': {},
         'post-create': {},
+        'failed-create': {},
+        'failed-load': {},
         'post-load': {
             'post-refresh': {}
         },
         'post-discover': {},
+        'failed-discover': {},
         'post-delete': {},
+        'failed-delete': {},
         'set-fixture': {},
         
         // callback(event, apiResult)
@@ -78,6 +106,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         'updated': {},
 
         // callback(event, apiObject)
+        'accessed-new': {},
         'accessed-related': {},
         'accessed-attribute': {},
         'accessed-unknown': {},
@@ -90,23 +119,34 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
     
     $.extend(ApiResult.prototype, {
         
-        init: function(obj, raw, action){
-            this.raw = raw || false;
+        init: function(settings){
+            this.raw = settings.raw || false;
             this.results= [];
-            this.obj= obj;
+            this._Resource = settings.resource;  // TODO: handle Lists (and other types?)
             this.settings= {};
             this.wasSuccessfull= undefined;
-            this.request= {};
+            this.request= undefined;
             this.ajaxID= null;
             this.response = undefined;
             this.responseText = undefined;
-            this.action = action;
+            this.action = settings.action;
             this.jqXHR = undefined;
+
+            delete settings.action;
+            delete settings.raw;
+            delete settings.resource;
+            this._config = settings;
         },
         
-        registerRequest: function(ajaxID, request){
-            this.ajaxID = ajaxID,
+        registerRequest: function(ajaxID, request, settings){
+            this.ajaxID = ajaxID;
+            if (!this.request && request) {
+                this.request = {};
+            }
             $.extend(this.request, request);
+            if (settings) {
+                this.registerSettings(settings);
+            }
         },
         
         registerSettings: function(settings){
@@ -116,10 +156,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         registerResult: function(result){            
             this.setStatus('', '', result.wasSuccessfull);
             this.results.push(result);
-        },
-        
-        getResponse: function(){ // TODO
-            return JSON.parse(this.responseText) || this.response
         },
         
         registerSuccess: function(response, status, jqXHR){
@@ -138,7 +174,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.setStatus('failed', error, false);
         },
         
-        wasCached: function(responseText){
+        wasCached: function(responseText, status, jqxhr){
+            if (responseText instanceof ApiResult) {
+                jqxhr = responseText.getXhr();
+                responseText = responseText.getResponse();
+            }
             if (this.raw) {
                 this.response = responseText;
             }else{
@@ -172,20 +212,156 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return 'json';
         },
         
-        getContent: function(format){
-            if (this.raw) {
-                return this.response
-            }else{
-                if (format === undefined) {
-                    format = this.getFormat();
+        getResponse: function(format){
+            return this.getContent(format, true);
+        },
+        
+        getContent: function(format, raw){  // TODO format
+            if (format === undefined) {
+                format = this.getFormat();
+            }
+            if (this.raw || raw) {
+                if (this.response === undefined && this.responseText === undefined) {
+                    var val;
+                    $.each(this.results, function(index, element){
+                        if (!val) {
+                            val = element.getContent(format, true);
+                        }
+                    });
+                    if (val) {
+                        return val
+                    }
                 }
-                return this.obj.__onLoad(format);                
+                return this.response || ((format === undefined || format == 'json') && typeof(this.responseText) == 'string' && this.responseText ? JSON.parse(this.responseText) : this.responseText)
+            }else{
+                var obj = this.getResource()
+                return obj.__onLoad(format);                
             }
         },
         
-        getObject: function(){
-            return this.obj.__onGet(true);
+        getRequest: function(){
+            if (!this.request) {
+                var val;
+                $.each(this.results, function(index, element){
+                    if (!val) {
+                        val = element.getRequest();
+                    }
+                });
+                if (val) {
+                    return val
+                }
+            }
+            return this.request
         },
+        
+        _get_as: function(name, force){
+            if (!this.wasSuccessfull && !force) {
+                return null
+            }
+            if (!this['_' + name]) {
+                var val;
+                $.each(this.results, function(index, element){
+                    if (!val) {
+                        val = element._get_as(name);
+                    }
+                });
+                if (val) {
+                    this['_' + name] = val;
+                }
+            }
+            if (!this['_' + name] || !this['_' + name].__onGet) {
+                if (!resources[name]) {
+                    throw Error('unknown resource type: "' + name + '"')
+                }
+                this['_' + name] = this.getNew(name);
+                this['_' + name].__updateFromResponse(this.getResponse(), this);
+            }
+            return this['_' + name].__onGet(true);
+        },
+        
+        getNew: function(name){
+            return new resources[name](this.getNewConfig(name));
+        },
+        
+        getNewConfig: function(name){
+            return $.extend({url: this.getRequest().url, result: this}, this._config)
+        },
+        
+        getResource: function(force){
+            return this._get_as('Resource', force)
+        },
+        
+        getList: function(force){
+            return this._get_as('List', force)
+        },
+        
+        getResponseType: function(){
+            return this.getXhr().getResponseHeader('X-ViewType')
+        },
+        
+        get: function(){
+            var type = this.getResponseType();
+            if (type) {
+                if (type == 'List') {
+                    return this.getList();
+                }else if (['Detail', 'Create'].indexOf(type) != -1){
+                    return this.getResource()
+                }
+            }
+            
+            var ranges = this.getXhr().getResponseHeader('Accept-Ranges');
+            if (ranges) {
+                return this.getList();
+            }
+            return this.getResource()
+        },
+        
+        getObject: function(){
+            throw Error('use getResource instead')
+        },
+        
+        registerXhr: function(xhr){
+            this.jqXHR = xhr
+        },
+        
+        getXhr: function(){
+            if (!this.jqXHR) {
+                var val;
+                $.each(this.results, function(index, element){
+                    if (!val) {
+                        val = element.getXhr();
+                    }
+                });
+                if (val) {
+                    return val
+                }
+            }
+            return this.jqXHR
+        },
+        
+        getHeaderLinks: function(){
+            return parseLinkHeader(this.getXhr().getResponseHeader('Link'))
+            
+        },
+        
+        getHeaderLinkTemplates: function(){
+            return parseLinkTemplateHeader(this.getXhr().getResponseHeader('Link-Template'));
+        },
+        
+        getSettings: function(){
+            if (!this.settings || $.isEmptyObject(this.settings)) {
+                var val;
+                $.each(this.results, function(index, element){
+                    if (!val) {
+                        val = element.getSettings();
+                    }
+                });
+                if (val) {
+                    return val
+                }
+            }
+            return this.settings
+        }
         
     });
         
@@ -239,7 +415,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             for (var link in active) {
                 url = active[link]['.'];
                 if (url) {
-                    links[link] = unpackURL(url, data)
+                    links[link] = unpackURL(url, data, this)
                 }                
             }
             this.links = links;
@@ -292,14 +468,16 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 data = settings.data,
                 asClone = settings.asClone,
                 initialContent = settings.initialContent,
-                url = settings.url;
+                url = settings.url,
+                uri = settings.uri,
+                info = settings.info;
             
             this.setLog(settings.log || null);
             this.__is_blank = settings.isBlank || false;
             this.__event_handler = {};
             this.__reset_obj(initialContent);
             
-            this.__id_attrs = ['uuid', 'id']
+            this.__info.id_attrs = ['uuid', 'pk', 'id']
             this.__apiClient  = apiClient;
             this.__path       = parent ? parent.__path : null;
             if (!asClone && target){
@@ -315,12 +493,33 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 if (url) {
                     this.__updateURLLinks({'.': url});
                 }
+                if (uri) {
+                    this.__updateURILinks({'.': uri});
+                }
+            }
+            if (info) {
+                $.extend(this.__info, info)
             }
 
         },
         
-        __updateURILinks: function(){
+        __updateURILinks: function(links){
             var $this = this;
+            function addLink(link, url) {
+                url = unpackURL(url, data, this);
+                $this.__URIlinks[link] = url;
+                if ($this.__links[link] === undefined) {
+                    $this.__links[link] = url;
+                }
+            }
+            
+            if (links) {
+                $.each(links, function(index, entry){
+                    addLink(index, entry);
+                })
+                return 
+            }
+
             var data = {}
             for (var entry in $this.__content['json']) {
                 data[entry] = $this.__content['json'][entry];
@@ -328,18 +527,19 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             // todo also include objects - data[object_name] = object.data??
             
             
-            function addLink(link, url) {
-                url = unpackURL(url, data);
-                $this.__URIlinks[link] = url;
-                if ($this.__links[link] === undefined) {
-                    $this.__links[link] = url;
+            if ($this.__apiClient.sitemap) {
+                if (this.__path) {
+                    var URIs = this.__path.getURIs($this.__apiClient.getSitemap());
+                    for (var link in URIs){
+                        addLink(link, URIs[link]);
+                    }
                 }
+                
+            }else{
+                _log(this.__log, 'warning', ['(IntrospectiveApi)', '(Object)', '(updateURILinks)', 'sitemap not loaded yet - so not updating uris'])
+                // api client not initialized yet. and
             }
             
-            var URIs = this.__path.getURIs($this.__apiClient.getSitemap());
-            for (var link in URIs){
-                addLink(link, URIs[link]);
-            }
         },
         
         /* URLLinks are links from the Response Header.
@@ -375,11 +575,19 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __asURL: function(target, data){
+            if (target === undefined) {
+                target = ((this.__URLlinks['self'] && !$.isEmptyObject(data) && this.__isCreated()) || (data && data['.'])) ? 'self' : null
+            }
+            
+            if (target == 'self' && (data && data['.'])) {
+                return data['.'] // TODO: as url
+            }
+            
+            if (target && this.__URLlinks[target]) {
+                return unpackURL(this.__URLlinks[target], data, this)
+            }
             if (LINK_HEADER_TARGETS.indexOf(target) != -1 && data && data[target] && this.__URLlinks[data[target]]) {
                 return this.__URLlinks[data[target]]
-            }
-            if (target && this.__URLlinks[target]) {
-                return unpackURL(this.__URLlinks[target], data)
             }
             
             var links = this.__URLlinks;
@@ -391,7 +599,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     throw Error('this one is not accessible')
                 }
                 if (url.indexOf('{') != -1) {
-                    throw Error('provided data  does not match')
+                    url = unpackURL(url, data, this)
+                    //throw Error('provided data  does not match')
                 }
                 return url
             }else{
@@ -402,9 +611,17 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __asURI: function(target, data){
+            if (target === undefined) {
+                target = ((this.__URIlinks['self'] && !$.isEmptyObject(data) && this.__isCreated()) || (data && data['.'])) ? 'self' : null
+            }
+            
+            if (target == 'self' && (data && data['.'])) {
+                return data['.'] // TODO: as uri
+            }
+
             if (target && this.__URIlinks[target]) {
                 if (data && LINK_HEADER_TARGETS.indexOf(target) != -1 && data[target]) {
-                    return unpackURL(this.__URIlinks[target], data)
+                    return unpackURL(this.__URIlinks[target], data, this)
                 }
                 return this.__URIlinks[target]
             }
@@ -413,6 +630,25 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 return this.__URIlinks[data[target]]
             }
             
+            var links = this.__URIlinks;
+            var url = '';
+        
+            if (links['.']) {
+                url = links['.'];
+                //if (url === undefined) {
+                //    throw Error('this one is not accessible')
+                //}
+                if (url.indexOf('{') != -1) {
+                    url = undefined
+                }
+                if (url) {
+                    return url
+                }
+            }
+            
+            if (!this.__path) {
+                return undefined
+            }
             var url = '';            
             for (var urlPart in this.__path.path){
                 var path = this.__path.path[urlPart];
@@ -427,13 +663,13 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __asResult: function(action, settings, raw){
-            var result = new ApiResult(this, raw, action);
+            var result = new ApiResult({resource: this, raw: raw, action: action});
             result.registerSettings(settings);
             return result
         },
         
         __isCreated: function(){// todo
-            return this.__sync.length > 0 && !$.isEmptyObject(this.__data);
+            return this.__sync.length > 0 && !$.isEmptyObject(this.__syncedContent.json);
         },
         
         __isBlank: function(){// todo
@@ -445,7 +681,15 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 if (!this.__data) {
                     this.__data = {}
                 }
-                this.__data[target] = data[target];
+                $.each(this.__info.id_attrs, function(index, attr){
+                    if (attr && data[attr]) {
+                        this.__data[attr] = data[attr];
+                    }
+                }.bind(this))
+                if (target && data[target]) {
+                    this.__data[target] = data[target];
+                }
+                
             }
             this.__path = new Path(this.__path, target, this.__data);
             //this.__links = {};
@@ -464,20 +708,30 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var log = settings.log || this.__log,
                 target = settings.target;
             delete settings.target;
-            var new_instance = this.__get(settings);//new LinkedResource({apiClient:this.__apiClient, parent:this, data:null, target:null, asClose:true, initialContent:settings.initialContent, log:log});
-            //this.__trigger('accessed-clone', [new_instance])
+            var new_instance = new ApiResource({
+                apiClient:this.__apiClient,
+                data:null,
+                target:null,
+                initialContent:settings.initialContent,
+                log:log,
+                info: $.extend({}, this.__info, {is_resource: true, is_list: false}),
+                url: this.__asURL() || this.__asURI()
+            });
+            
             new_instance.__initialized = true;
             new_instance.__trigger('initialized', [])
             new_instance.__bind('post-create', function(event, result){
                 if (result.wasSuccessfull) {
-                    new_instance.__updatePath(target, result.obj.__syncedContent['json']);
+                    new_instance.__updatePath(target, result.getResource().__syncedContent['json']);
                 }
             })
+            this.__trigger('accessed-new', [new_instance])
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', 'accessed new', new_instance, 'from', this])
             return new_instance
         },
         __create: function(data, callback){ // TODO: update path as well here?
             var $this = this;
-            obj = new LinkedResource({apiClient:this.__apiClient, parent:this, target:null, data:data, asClone:true, initialContent:data, log: this.__log});
+            obj = new ApiResource({apiClient:this.__apiClient, parent:this, target:null, data:data, asClone:true, initialContent:data, log: this.__log});
             request = {
                 data: data,
                 type: 'post',
@@ -485,22 +739,22 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 
             }
             var result = obj.__asResult('create', {data:data, callback:callback});
-            request.done = function(response, status, jqXHR){
-                $this.__finishedLoading(result);
-                result.registerSuccess(response, status, jqXHR); 
-                obj.__updateFromResponse(response, result);
+            request.done = function(_result){
+                result.registerResult(_result);
+                obj.__updateFromResponse(_result.getResponse(), result);
                 if (callback instanceof Function) {
                     callback(result);
                 }
                 $this.__trigger('post-create', [result]);
+                $this.__finishedLoading(result);
             }
-            request.fail = function(jqXHR, statusText, errorThrown){
-                $this.__finishedLoading(result);
-                result.registerFailure(jqXHR, statusText, errorThrown);
+            request.fail = function(_result){
+                result.registerResult(_result);
                 if (callback instanceof Function) {
                     callback(result);
                 }
-                $this.__trigger('post-create', [result]);
+                $this.__trigger('failed-create', [result]);
+                $this.__finishedLoading(result);
             }
             
             this.__setURL(request);
@@ -508,7 +762,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__startLoading(result);
             var ajaxID = this.__apiClient.add(request, requestSettings);            
             obj.__sync.push(ajaxID);
-            result.registerRequest(ajaxID, request);
+            result.registerRequest(ajaxID, request, requestSettings);
             return obj
         },
         
@@ -521,29 +775,29 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var $this = this;
             var result = this.__asResult('execute', {action:action, data:data, callback:callback}),
                 request = {type:'post'};
-            request.done = function(response, status, jqXHR){
-                $this.__finishedLoading(result);
-                result.registerSuccess(response, status, jqXHR); 
+            request.done = function(_result){
+                result.registerResult(_result); 
                 //obj.__updateFromResponse(response, result);
                 if (callback instanceof Function) {
                     callback(result);
                 }
                 $this.__trigger('post-execute', [result]);
-            }
-            request.fail = function(jqXHR, statusText, errorThrown){
                 $this.__finishedLoading(result);
-                result.registerFailure(jqXHR, statusText, errorThrown);
+            }
+            request.fail = function(_result){
+                result.registerResult(_result);
                 if (callback instanceof Function) {
                     callback(result);
                 }
-                $this.__trigger('post-execute', [result]);
+                $this.__trigger('failed-execute', [result]);
+                $this.__finishedLoading(result);
             }
             
             this.__setURL(request, {action: action, data: data});
             var requestSettings = {log: this.__log};
             this.__startLoading(result);
             var ajaxID = this.__apiClient.add(request, requestSettings);
-            result.registerRequest(ajaxID, request);
+            result.registerRequest(ajaxID, request, requestSettings);
             return result
         },
         
@@ -554,33 +808,42 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 action;
             if (typeof target_or_action == 'object') {
                 action = target_or_action;
-                action_meta = this.__discovered.actions[action['action']];
+                action_meta = this.__discovered.getResponse().actions[action['action']];
             }else{
                 target = target_or_action;
             }
 
-            if (action === undefined) {
-                $.extend(data, this.__unresolvedData);
-                if (request.data) {
-                    $.extend(data, request.data);
+            if (request.data instanceof FormData) {
+                if (this.__unresolvedData) {
+                    $.each(this.__unresolvedData, function(name, content){
+                        request.data.append(name, content);
+                    })
                 }
             }else{
-                data = action['data'];
-                if (data === undefined) {
-                    data = {};
-                    for (var attr in action_meta) {
-                        data[attr] = this.__content['json'][attr];
-                        if (action_meta[attr].required && data[attr] === undefined) {
-                            _log(this.__log, 'error', ['missing attribute "' + attr + '" in order to execute "' + action['action'] + '"', this])
-                            throw Error('cannot execute "' + action['action'] + '"')
+                if (action === undefined) {
+                    $.extend(data, this.__unresolvedData);
+                    if (request.data) {
+                        $.extend(data, request.data);
+                    }
+                }else{
+                    data = action['data'];
+                    if (data === undefined) {
+                        data = {};
+                        for (var attr in action_meta) {
+                            data[attr] = this.__content['json'][attr];
+                            if (action_meta[attr].required && data[attr] === undefined) {
+                                _log(this.__log, 'error', ['missing attribute "' + attr + '" in order to execute "' + action['action'] + '"', this])
+                                throw Error('cannot execute "' + action['action'] + '"')
+                            }
                         }
                     }
                 }
+                request.data = data;
             }
-            request.data = data;
             
             
-            var url = this.__asURL(target);
+            
+            var url = this.__asURL(target, data);
             if (url) {
                 if (action !== undefined) {
                     if (url.indexOf('?') == -1) {
@@ -592,7 +855,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 }
                 request.url = url
             }else{
-                var uri = this.__asURI(target);
+                var uri = this.__asURI(target, data);
                 if (uri) {
                     if (action !== undefined) {
                         if (uri.indexOf('?') == -1) {
@@ -641,15 +904,17 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         
-        __save: function(callback){    
+        __save: function(callback_or_settings){    
             var $this = this;            
             var apiClient = $this.__apiClient;
             var todo = 1; // starting at 1!!
             var sync_obj;
-            var settings = {callback: callback},
+            var settings = typeof(callback_or_settings) == 'function' ? {callback: callback_or_settings}: callback_or_settings || {},
                 isCreated = this.__isCreated();
+            var asFormData = settings.asFormData;
             
             var result = this.__asResult('save', settings);
+            
             
             function onChange(target, new_state){
                 return; //todo?
@@ -663,9 +928,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     callback(result);
                 }
                 if (isCreated) {
-                    $this.__trigger('post-save', [result]);
+                    $this.__trigger((childrenResult.wasSuccessfull ? 'post' : 'failed') + '-save', [result]);
                 }else{
-                    $this.__trigger('post-create', [result]);
+                    $this.__trigger((childrenResult.wasSuccessfull ? 'post' : 'failed') + '-create', [result]);
                 }
             }
         
@@ -676,14 +941,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__checkContent()
             var data = {};
             var seperateRequest = [];
-            var saveObject = false,
+            var saveObject = !isCreated,
                 values = [];
             for (var target in $this.__uncommitted) {
                 //if (!$this.__syncedContent['json'].hasOwnProperty(target)) { //  
                     //if (!$this.__objects[target].__isCreated()) {
                     //    seperateRequest.push(target);
                     //};
-                if ($this.__objects[target] && !($this.__objects[target] instanceof ResourceAttribute) && !(this instanceof LinkedRelationship)) {
+                if ($this.__objects[target] && !($this.__objects[target] instanceof ResourceAttribute) && !(this instanceof ApiList)) {
                     if ($this.__objects[target].needsSave()){
                         $this.__objects[target].save();
                     }
@@ -696,11 +961,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     saveObject = true;
                     values.push(target);
                 }
+                if (!asFormData && $this.__objects[target] && ($this.__objects[target] instanceof ResourceAttribute) && $this.__objects[target].requiresFormData()) {
+                    asFormData = true;
+                }
                 
                 $this.__committing[target] = $this.__uncommitted[target];
                 delete $this.__uncommitted[target];
             }
-            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(save)', 'committing', values])
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(save)', 'committing', values, this.__uncommitted])
             
             var completeUpdate = undefined;
             for (var entry in data){
@@ -730,22 +998,21 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
             
             function finishedSaving(result, data){
-                return function(response, status, jqXHR){
-                    $this.__finishedLoading(result);
-                    result.registerSuccess(response, status, jqXHR);
-                    $this.__updateFromResponse(response, result);
+                return function(_result){
+                    result.registerResult(_result);
+                    $this.__updateFromResponse(_result.getResponse(), result);
                     
                     for (var target in data) {
                         delete $this.__committing[target];
                     }
                     finishedOne(result);
+                    $this.__finishedLoading(result);
                 }
             }
             
             function failedSaving(result, data){
-                return function(jqXHR, status, error){
-                    $this.__finishedLoading(result);
-                    result.registerFailure(jqXHR, status, error);
+                return function(_result){
+                    result.registerResult(_result);
                     
                     for (var target in data) {
                         if ($this.__uncommitted[target] === undefined){
@@ -754,6 +1021,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         delete $this.__committing[target];
                     }
                     finishedOne(result);
+                    $this.__finishedLoading(result);
                 }
             }
             /*
@@ -812,7 +1080,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 todo += 1;
                 var request = {
                     type: method,
-                    data: data,
                     //data: JSON.stringify(data),
                     //contentType: 'application/json; charset=utf-8',
                     //processData: false,
@@ -821,11 +1088,31 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     fail: failedSaving(result, data),                    
                     isApiInternal: true,
                 };
+                if (asFormData) {
+                    var formData = new FormData();
+                    var attributes = this.getAttributes();
+                    $.each(data, function(name, val){
+                        var attr = attributes[name];
+                        if (!attr || !attr.requiresFormData()) {
+                            formData.append(name, val);
+                        }else{
+                            var file = attr.getFormData();
+                            formData.append(name, file);
+                        }
+                        
+                    })
+                    request.data = formData;
+                    request.processData = false;
+                    request.contentType = false;
+                    request.signPayload = false; 
+                }else{
+                    request.data = data;
+                }
                 
                 $this.__setURL(request);
                 var requestSettings = {log: this.__log};
                 sync_obj = apiClient.add_urgent(request, requestSettings)
-                result.registerRequest(sync_obj, request);
+                result.registerRequest(sync_obj, request, requestSettings);
                 
                 var number = $this.__sync.push(sync_obj);
                 for (var target in data) {
@@ -872,12 +1159,28 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return 'json'
         },
         
+        __asIdentifier: function(){
+            return this.__getID() || this.__asURL() + '!';  // TODO
+        },
+        
         __getID: function(data){
             if (data === undefined) {
                 data = this.__data
+                if (!data || $.isEmptyObject(data)) {
+                    data = this.__content['json']
+                }
             }
-            for (var index in this.__id_attrs){
-                var attr_name = this.__id_attrs[index];
+            if (typeof data == 'string' || typeof data == 'integer') {
+                return data
+            }
+            if (!data) {
+                return undefined
+            }
+            if (typeof data == 'object' && typeof(data.__getID) == 'function') {
+                return data.__getID()
+            }
+            for (var index in this.__info.id_attrs){
+                var attr_name = this.__info.id_attrs[index];
                 if (data[attr_name]) {
                     return data[attr_name]
                 }
@@ -929,19 +1232,34 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 obj,
                 _settings = $.extend({}, settings),
                 target = LINK_HEADER_TARGETS.indexOf(settings.target) == -1 ? settings.target : settings.data[settings.target],
+                as_attr = false,
                 accessType;
-                
+            if (target == 'attr') {
+                as_attr = true;
+                target = settings.data[target];
+            }
+
             if (old && !old.__isBlank()) {
                 return old
             }
             if (old === undefined || old.__isBlank()) {
-                if ($this.__links[_settings.target] != undefined || $this.__links[target] != undefined || _settings.target == 'relationship' ){
+                 if (as_attr || ($this.__getAttributes(false)[target] || $this.__content[target] != undefined) && (!settings.data || $.isEmptyObject(settings.data))) {
+                    _settings.data = this.__getAttributes(false)[target];
+                    var attribute = new ResourceAttribute(_settings);
+                    attribute.__updateContent(this.__content['json'][target]);
+                    obj = attribute;
+                    accessType = "attribute";
+                }else if ($this.__links[_settings.target] != undefined || $this.__links[target] != undefined || _settings.target == 'relationship' ){
                     // TODO: only if were on object endpoint!! LINK_HEADER_TARGETS.indexOf(settings.target) != -1){
 
                     var resource;
                     _settings.url = this.__asURL(_settings.target, _settings.data);
+                    if (!_settings.url) {
+                        _settings.uri = this.__asURI(_settings.target, _settings.data);
+                    }
+                    
                     if (settings.target == 'relationship') {
-                        resource = new LinkedRelationship(_settings);
+                        resource = new ApiList(_settings);
                         var relationship = _settings.data;
                         if (relationship instanceof Object) {
                             relationship = _settings.data.relationship
@@ -953,11 +1271,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     }
                     obj = resource;
                     accessType = "related";
-                }else if ($this.__content[target] != undefined) {
-                    _settings.data = null;
-                    var attribute = new ResourceAttribute(_settings);
-                    obj = attribute;
-                    accessType = "attribute";
                 }else{// && $this.__initialized != true) {
                     if (old && old.__isBlank()) {
                         obj = old;
@@ -969,8 +1282,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         accessType = "unknown";
                         if (!$this.__initialized) {
                             $this.__bind('initialized', function(){
-                                $this.__resolveObj(targetID, settings)
+                                $this.__resolveObj(targetID, settings);
+                                // replacement is done when resolving
                             })
+                            $this.discover({});
                         }
                     }
                 }
@@ -992,11 +1307,16 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                             }
                         }); // TODO: force: true
                     } else{
-                        delete $this.__unevaluatedObjects[targetID];
+                        // todo: do this another time
+                        //delete $this.__unevaluatedObjects[targetID];
                     }
                 }
                 if (!obj.__isBlank()) {
                     this.__setObj(targetID, obj);
+                }else{
+                    obj.bind('initialized', function(){
+                        $this.__setObj(targetID, obj);
+                    })
                 }
                 this.__trigger('accessed-' + accessType, [obj])
             }
@@ -1005,6 +1325,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
 
         __setObj: function(target, obj){
+             // todo: uuid => global storage as in __get as well
             var $this = this;
             this.__objects[target] = obj;
             obj.__bind('replaced', function(event, newObj){
@@ -1046,8 +1367,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     }
                 }
                 if (!target) {
-                    for (var index in this.__id_attrs){
-                        var attr_name = this.__id_attrs[index];
+                    for (var index in this.__info.id_attrs){
+                        var attr_name = this.__info.id_attrs[index];
                         if (data[attr_name]) {
                             target = attr_name;
                             break
@@ -1055,7 +1376,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     }
                 }
                 if (!target) {
-                    log.error('(introspectiveApiClient)', '(ApiObject)', 'could parse target.', target, data, this);
+                    _log(log, 'error', ['(introspectiveApiClient)', '(ApiObject)', 'could parse target.', target, data, this]);
                     throw Error('could not parse target')
                 }
             }
@@ -1076,14 +1397,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 },
                 obj;
             
-            if (this.__isBlank()) {
-                settings.isBlank = true;
-                var _placeholder = new ApiPlaceholder(settings);
-                this.__bind('replaced', function(event, newParent){
-                    _placeholder.replaceWith(newParent.__get(targetOrSettings, _data, wrapped))
-                })
-                obj = _placeholder;
-            }else if (target) {
+            if (target) {
                 //var wasCreated = undefined;
                 obj = this.__resolveObj(targetID, settings)
                 
@@ -1092,6 +1406,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                         "status": "found",
                         "timestamp": +new Date()/1000,
                     };
+                    if (this.isBlank()) {
+                        this.__bind('replaced', function(event, newParent){
+                            obj.replaceWith(newParent.__get(targetOrSettings, _data, wrapped))
+                        })
+                    }
                     
                     /*if (wasCreated) {
                         wasCreated.__bind('updated', function(event, formatID, content){
@@ -1116,7 +1435,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     data:data,
                     asClone:true,
                     initialContent: content,
-                    log:log
+                    log:log,
+                    info: this.__info
                 },
                     clone = new this.constructor(clone_config);
                 this.__trigger('accessed-clone', [clone]);
@@ -1188,7 +1508,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             
             var result = this.__asResult('prepare', settings);
             
-            function finnishTarget(targetResult) {
+            function finishTarget(targetResult) {
                 todo -= 1;
                 
                 var callbacks = targetResult.settings.callbacks;
@@ -1225,11 +1545,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 
                 targetSettings.callback = function(result){
                     if (targetSettings.depending != undefined) {
-                        result.prepare(targetSettings.depending, function(dependingResult){
+                        result.getResource().prepare(targetSettings.depending, function(dependingResult){
                                                                     result.appendResult(dependingResult);
-                                                                    finnishTarget(result);});
+                                                                    finishTarget(result);});
                     }else{
-                        finnishTarget(result);
+                        finishTarget(result);
                     }     
                 };
                 
@@ -1257,13 +1577,13 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             if (this.__discovering != undefined) {
                 //var result = this.__asResult('discover', settings);
                 var callbacks = {};
-                callbacks.done = function(response, status, jqXHR){
-                    result.registerSuccess(response, status, jqXHR);
-                    $this.__updateFromResponse(response, result);
+                callbacks.done = function(_result){
+                    result.registerResult(_result);
+                    $this.__updateFromResponse(_result.getResponse, result);
                     if (settings.callback)settings.callback(result);
                 }
-                callbacks.fail = function(jqXHR, statusText, errorThrown){
-                    result.registerFailure(jqXHR, statuText, errorThrown);
+                callbacks.fail = function(_result){
+                    result.registerResult(_result);
                     if (settings.callback)settings.callback(result);
                 }
                 
@@ -1278,25 +1598,25 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 $this.__startLoading(result);
                 var request = {
                     type: 'options',
-                    done: function (response, text, jqXHR) {                
-                        $this.__finishedLoading(result);
-                        $this.__discovered = response;
+                    done: function (_result) {
                         $this.__discovering = undefined;
-                        result.registerSuccess(response, text, jqXHR);
-                        $this.__updateFromResponse(response, result);
+                        result.registerResult(_result);  
+                        //$this.__discovered = _result;^
+                        $this.__updateFromResponse(_result.getResponse(), result);
                         if (settings.callback instanceof Function) {
                             settings.callback(result); 
                         }
-                        $this.__trigger('post-discover', [result]);         
+                        $this.__trigger('post-discover', [result]);                         
+                        $this.__finishedLoading(result);
                 
                     },
-                    fail: function (jqXHR, statuText, errorThrown) {                
-                        $this.__finishedLoading(result);
-                        result.registerFailure(jqXHR, statuText, errorThrown);
+                    fail: function (_result) {                
+                        result.registerResult(_result);
                         if (settings.callback instanceof Function) {
                             settings.callback(result);      
                         }  
-                        $this.__trigger('post-discover', [result]);
+                        $this.__trigger('failed-discover', [result]);
+                        $this.__finishedLoading(result);
                     },
                     isApiInternal: true
                 };
@@ -1318,7 +1638,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     $this.__discovering = ajaxID;
                 };          
                 $this.__sync.push(ajaxID);
-                result.registerRequest(ajaxID, request);
+                result.registerRequest(ajaxID, request, requestSettings);
             }
             
             return result
@@ -1340,12 +1660,12 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             if (this.__initializing != undefined) {
                 var result = this.__asResult('load', settings);
                 var callbacks = {};
-                callbacks.done = function(response, status, jqXHR){
-                    result.registerSuccess(response, status, jqXHR);
+                callbacks.done = function(_result){
+                    result.registerResult(_result);
                     if (settings.callback)settings.callback(result);
                 }
-                callbacks.fail = function(jqXHR, statusText, errorThrown){
-                    result.registerSuccess(jqXHR, statusText, errorThrown);
+                callbacks.fail = function(_result){
+                    result.registerResult(_result);
                     if (settings.callback)settings.callback(result);
                 }
                 
@@ -1368,11 +1688,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 settings.returnResult = true;
                 result = this.__refresh(settings);
                 var callbacks = {};
-                callbacks.done = function(response, status, jqXHR){
-                    $this.__trigger('post-load', [result]);
+                callbacks.done = function(_result){
+                    $this.__trigger('post-load', [result, _result]);
                 }
-                callbacks.fail = function(jqXHR, statusText, errorThrown){
-                    $this.__trigger('post-load', [result]);
+                callbacks.fail = function(_result){
+                    $this.__trigger('failed-load', [result, _result]);
                 }
                 this.__apiClient.registerCallbacksForRequest(result.ajaxID, callbacks);
             }      
@@ -1403,23 +1723,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             $this.__startLoading(result);
             var request = {
                 type: settings.loadContent ? 'get' : 'head',
-                done: function (response, text, jqXHR) {                       
-                    $this.__finishedLoading(result);
-                    result.registerSuccess(response, text, jqXHR);      
-                    $this = $this.__updateFromResponse(response, result, settings); 
+                done: function (_result) {          
+                    result.registerResult(_result);    
+                    $this = $this.__updateFromResponse(_result.getResponse(), result, settings); 
                     if (settings.callback instanceof Function) {
                         settings.callback(result);      
                     }   
-                    $this.__trigger('post-refresh', [result]);            
+                    $this.__trigger('post-refresh', [result]);
+                    $this.__finishedLoading(result);  
             
                 },
-                fail: function (jqXHR, statuText, errorThrown) {                
-                    $this.__finishedLoading(result);
-                    result.registerFailure(jqXHR, statuText, errorThrown);
+                fail: function (_result) {
+                    result.registerResult(_result);
                     if (settings.callback instanceof Function) {
                         settings.callback(result);      
                     }
-                    $this.__trigger('post-refresh', [result]);
+                    $this.__trigger('failed-refresh', [result]);
+                    $this.__finishedLoading(result);
                 },
                 isApiInternal: true
             };
@@ -1438,7 +1758,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var requestSettings = {log: settings.log || this.__log};
             var ajaxID = $this.__apiClient.add(request, requestSettings);
             $this.__sync.push(ajaxID);
-            result.registerRequest(ajaxID, request);
+            result.registerRequest(ajaxID, request, requestSettings);
             if ($this.__initializing === undefined && settings.loadContent) {
                 $this.__initializing = ajaxID;
             };            
@@ -1467,23 +1787,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             $this.__startLoading(result);
             var request = {
                 type: 'delete',
-                done: function (response, text, jqXHR) {                             
-                    $this.__finishedLoading(result);
-                    result.registerSuccess(response, text, jqXHR);
-                    $this = $this.__updateFromResponse(response, result, settings); 
+                done: function (_result) {
+                    result.registerResult(_result);
+                    $this = $this.__updateFromResponse(_result.getResponse(), result, settings); 
                     if (settings.callback instanceof Function) {
                         settings.callback(result);      
                     }   
                     $this.__trigger('post-delete', [result]);
-                    $this.__reset_obj();
-                },
-                fail: function (jqXHR, statuText, errorThrown) {                
+                    $this.__reset_obj();                             
                     $this.__finishedLoading(result);
-                    result.registerFailure(jqXHR, statuText, errorThrown);
+                },
+                fail: function (_result) {
+                    result.registerResult(_result);
                     if (settings.callback instanceof Function) {
                         settings.callback(result);      
                     }
-                    $this.__trigger('post-delete', [result]);
+                    $this.__trigger('failed-delete', [result]);                
+                    $this.__finishedLoading(result);
                 },
                 isApiInternal: true
             };
@@ -1491,7 +1811,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var requestSettings = {log: settings.log || this.__log};
             var ajaxID = $this.__apiClient.add(request, requestSettings);
             $this.__sync.push(ajaxID);
-            result.registerRequest(ajaxID, request);
+            result.registerRequest(ajaxID, request, requestSettings);
             return $this
         },
         
@@ -1555,7 +1875,13 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     }else{
                         for (var entry in content) {
                             // todo: first check storage for cached instance
-                            var obj = new ApiObject({apiClient: this.__apiClient, parent: this, target: null, data: content[entry], asClone:true, log:log});
+                            var _settings = {apiClient: this.__apiClient, parent: this, target: undefined, data: content[entry], asClone:true, log:log};
+                            
+                            _settings.url = this.__asURL(_settings.target, _settings.data);
+                            if (!_settings.url) {
+                                _settings.uri = this.__asURI(_settings.target, _settings.data);
+                            }
+                            var obj = new ApiObject(_settings);
                             obj.__updateContent(content[entry], dataType, uncommitted, settings);
                             obj.__initialized = true;
                             obj.__initializing = undefined;
@@ -1567,7 +1893,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                                 this.__setObj(id, obj);
                             }
                         }
-                        $.extend(this.__content['json'], content);
+                        //$.extend(this.__content['json'], content);
+                        //_log(this.__log, 'debug', ['(introspectiveApi)', '(Object)', 'updating array', this, 'with', content, 'to', $.extend(this.__content['json'], content)])
+                        this.__content['json'] = $.extend(this.__content['json'], content);
                     }
                 }else if (content instanceof Object) {/*
                     for (var entry in content) {
@@ -1580,9 +1908,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     for (var entry in content) {
                         if (format == 'json'){// && !content[entry] instanceof Object) {
                             this.__update(entry, content[entry], uncommitted, settings.replace);
+                        }else{
+                            throw Error('TODO: implement update with format != json')
                         }
                     }
-                    for (var entry in this.__objects) {
+                    for (var entry in this.__objects) {  // TODO: is this needed?
+                        if (!content.hasOwnProperty(entry)) {
+                            continue
+                        }
                         var obj = this.__get(entry);
                         obj.__updateContent(content[entry], format, uncommitted, settings);
                     }
@@ -1596,16 +1929,60 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this
             
         },
+        
+        __getAttributes: function(required){
+            if (this.__info.attributes) {
+                return this.__info.attributes
+            }
+            if (!required) {
+                return {}
+            }
+            throw Error('TODO: implement resource.getAttributes')
+        },
 
-        __update_info: function(result){
-            var jqXHR = result.jqXHR,
-                $this = this;
+        __update_info: function(result, is_discovery){
+            var jqXHR = result.getXhr(),
+                $this = this,
+                response = is_discovery ? result.getResponse('json') : {};
+
+            if (is_discovery) {
+                this.__discovered = result;
+            }
+    
+            if (result.getRequest().type.toLowerCase() == 'post') {
+                var location = jqXHR.getResponseHeader('Location');
+                if (location){
+                    additionalLinks['.'] = location;
+                }
+            }else if (jqXHR.url) {
+                additionalLinks['.'] = jqXHR.url;
+            }
+
+            _log(result.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', 'link header', this, result, jqXHR.getResponseHeader('Link'), jqXHR.getResponseHeader('Link-Template')])
+            $.extend(additionalLinks, parseLinkHeader(jqXHR.getResponseHeader('Link')));
+            $.extend(additionalLinks, parseLinkTemplateHeader(jqXHR.getResponseHeader('Link-Template')));
+            this.__updateURLLinks(additionalLinks);
 
             if (jqXHR) {
                 var ranges = jqXHR.getResponseHeader('Accept-Ranges');
+                if (!ranges) {
+                    ranges = response['Accept-Ranges']
+                }
+                var viewType = jqXHR.getResponseHeader('X-ViewType');
                 this.__info.ranges = ranges;
-                this.__info.is_list = ranges ? ranges.indexOf('x-records') != -1 : false;
+                // TODO: this is not good so far..
+                this.__info.is_list = (ranges ? ranges.indexOf('x-records') != -1 && this.isCreated() : false) || (viewType && viewType == 'List');
                 this.__info.is_resource = !this.__info.is_list;
+            }
+            if (response['attributes']) {
+                this.__info.attributes = response['attributes'];
+            }
+            if (response['pk_names']) {
+                this.__info.id_attrs = response['pk_names'];
+            }
+            
+            if (response['actions'] && (response['actions']['POST'] || response['actions']['PUT'])) {
+                this.__info.attributes = response['actions']['POST'] || response['actions']['PUT'];
             }
 
             if (this.constructor === ApiObject) {
@@ -1620,10 +1997,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                     replacement;
                 if (this.__info.is_list) {
                     list = this.__get();
-                    replacement = new LinkedRelationship(clone_config);
+                    replacement = new ApiList(clone_config);
                 }else if (this.__info.is_resource) {
                     // TODO: this leads to unacceptable behaviour as it sets this to blank
-                    //replacement = new LinkedResource(clone_config);
+                    //replacement = new ApiResource(clone_config);
                 }
                 if (replacement) {
                     replacement.__updateFromResponse(result.getResponse(), result)
@@ -1635,30 +2012,41 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __updateFromResponse: function(response, result, settings){
             var $this = this;
-            var jqXHR = result.jqXHR;
+            var jqXHR = result.getXhr();
             additionalLinks = {};
-            settings = settings || {};
-            if (!result.request.type) {
+            settings = settings || {},
+            request = result.getRequest();
+            if (!request.type) {
                 return _log(settings.log || this.__log, 'warning', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', 'result doesnt contain any resquest', result])
             }
             
-            this.__update_info(result);
+            this.__update_info(result, request.type.toLowerCase() == 'options');
             // todo:
             /*                
                 $this.__onChange(target, state);
                 if (settings.onChange) settings.onChange(state);*/
-            if (result.request.type.toLowerCase() == 'post' && !response) {
+            if (request.type.toLowerCase() == 'post' && !response) {
                 // TODO: check "Location" header and get content from there
                 _log(settings.log || this.__log, 'error', ['(IntrospectiveApi)', '(ApiObject)', '(TODO)', 'fetch resource from Location Header'])
             }else{
-                settings.replace = ['head', 'patch'].indexOf(result.request.type.toLowerCase()) != -1 ? false : true;
-                var data = ['put', 'post', 'patch'].indexOf(result.request.type.toLowerCase()) != -1 ?
-                                response || result.request.data
+                settings.replace = ['head', 'patch'].indexOf(request.type.toLowerCase()) != -1 ? false : true;
+                var data = ['put', 'post', 'patch'].indexOf(request.type.toLowerCase()) != -1 ?
+                                response || request.data
                                 : response;
-                if (result.request.type.toLowerCase() != 'options'){
+                if (request.type.toLowerCase() != 'options'){
+                    if (data && (!this.__data || $.isEmptyObject(this.__data))) {
+                        if (!this.__data) {
+                            this.__data = {};
+                        }
+                        $.each(this.__info.id_attrs, function(index, name){
+                            if (data[name]) {
+                                this.__data = data[name];
+                            }
+                        })
+                    }
                     this.__updateContent(data, jqXHR.getResponseHeader('Content-Type'), false, settings, result);
                 // replacing/updating __syncedContent
-                //$this.__syncContent(data, result.request.type.toLowerCase() == 'put' ? true : false);
+                //$this.__syncContent(data, request.type.toLowerCase() == 'put' ? true : false);
                     this.__checkContent();
                 
                     // todo store as AttibuteObjects
@@ -1676,18 +2064,6 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 }                      
                 
             }     
-            if (result.request.type.toLowerCase() == 'post') {
-                var location = jqXHR.getResponseHeader('Location');
-                if (location){
-                    additionalLinks['.'] = location;
-                }
-            }else if (jqXHR.url) {
-                additionalLinks['.'] = jqXHR.url;
-            }
-            _log(settings.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', result, jqXHR.getResponseHeader('Link'), jqXHR.getResponseHeader('Link-Template')])
-            $.extend(additionalLinks, parseLinkHeader(jqXHR.getResponseHeader('Link')));
-            $.extend(additionalLinks, parseLinkTemplateHeader(jqXHR.getResponseHeader('Link-Template')));
-            this.__updateURLLinks(additionalLinks);
             return $this
         },
          
@@ -1737,7 +2113,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         __updateArray: function(value, uncommitted, replace){
             var $this = this;
             if (!this.__info.is_resource) {
-                throw Error('handle relationships in LinkedRelationship')
+                throw Error('handle relationships in ApiList')
             }
             _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(update)', 'update resource as array', value, uncommitted, replace])
             
@@ -1757,10 +2133,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 str_orig = JSON.stringify($this.__syncedContent['json'][target]);
             uncommitted = uncommitted === undefined ? true : uncommitted;
             replace = replace === undefined ? true : replace;
-            //targetObj = $this.__get(target);
-            //if (targetObj instanceof ResourceAttribute) {
-            //    targetObj.__update(value);
-            //}
+            targetObj = this.__objects[target];
+            if (targetObj instanceof ResourceAttribute) {
+                targetObj.__update(value);
+            }
             if (str_value === str_content === str_orig) {
                 return
             }
@@ -1813,6 +2189,9 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         __finishedLoading: function(result){
             this.__loading -= 1;
+            if (!result.wasSuccessfull) {
+                this.__trigger('failed-loading', [result])
+            }
             if (this.__loading == 0) {
                 this.__trigger('finished-loading', [result])
             }else{
@@ -1836,18 +2215,17 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             return this.__content;
         },
         
-        __connect: function(domElement, callback){
-            domElement = $(domElement);
+        __connect: function(_domElement, callback){ // TODO: if domElement is instance of jQuery: get real element
+            var domElement = _domElement instanceof $ ? _domElement : $(_domElement);
             this.__domElements.push(domElement);
-            
             var inputTargets = new Array();
             $.each(domElement.find(':input'), function(index, elem){
                 var name = $(elem).attr('name');
                 if (name)inputTargets.push(name);
             });
-            if (this.__initialized || self.__data) {
+            if ((this.__initialized || this.__data) && this.__isCreated()) {
                 this.__prepare(inputTargets, function(result){
-                    var $this = result.getObject();
+                    var $this = result.getResource();
                     for (var obj in $this.__objects) {
                         var target = obj.split('|')[0];
                         var input = domElement.find(':input[name="'+target+'"]');
@@ -1865,15 +2243,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 this.__discover({
                     //data: inputTargets,
                     callback: function(result){
-                        var $this = result.getObject();
-                        var content = result.getContent();
-                        for (var obj in content['actions']['POST']) {
-                            var target = obj;
+                        var $this = result.getResource();
+                        $.each($this.__getAttributes(), function(target, config){
                             var input = domElement.find(':input[name="'+target+'"]');
+                    
                             if (input.size()) {
                                 $this.__get(target).connect(input);
                             }
-                        }
+                        })
                         
                     },
                 });
@@ -1883,11 +2260,12 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             if (submitButton.size()) {
                 var $this = this;
                 submitButton.click(function(event){ // on('click.introspective-api-object.'+this.__getID()
+                    event.preventDefault();
                     event.stopImmediatePropagation();
                     try{
                         $this.__save();
                     }catch (e){
-                        _log(log, 'error', ['failed saving', e]);
+                        _log(this.__log, 'error', ['failed saving', e]);
                         console.error(e.stack)
                     }
                     return false;
@@ -1896,8 +2274,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
 
         },
         
-        __disconnect: function(domElement){
-            domElement = $(domElement);
+        __disconnect: function(_domElement){ // TODO: if domElement is instance of jQuery: get real element
+            var domElement = _domElement instanceof $ ? _domElement : $(_domElement);
             
             domElement.off('.introspective-api-object.'+this.__getID())
             
@@ -1938,7 +2316,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 //if (this._replaced_with) {
                 //    return this._replaced_with.__replaceWith(resource);
                 //}
-                this.__trigger('replaced', [resource]);
+                this.__trigger('replaced', [resource, this]);
                 //replaceWith should automatically call the handlers of replaced objects get, load, É with new object.
 
                 this._replaced_with = resource;
@@ -1959,7 +2337,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                    try {
                        this.__event_handler[event_name][i].apply(null, event_args);
                    } catch (e) {
-                       _log(this.__log, 'error', ['could not execute event "'+ event_name +'"', event, 'callback:', this.__event_handler[event_name][i], 'got error:', e])
+                       _log(this.__log, 'error', ['could not execute event "'+ event_name +'"', event, 'callback:', this.__event_handler[event_name][i], 'got error:', e, 'at', e.stack])
                    }
                 }
             }
@@ -2006,6 +2384,23 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             // delete this.uncommitted
         },
         
+        getAttributes: function(){
+            var attrs = {},
+                $this = this;
+            $.each(this.__getAttributes.apply(this, arguments), function(name, config){
+                attrs[name] = $this.__get(name);
+            })
+            return attrs
+        },
+        
+        getID: function(){
+            return this.__getID.apply(this, arguments)
+        },
+        
+        getUUID: function(){
+            return 'TODO_UUID'
+        },
+        
         reset: function(){
             return this.__reset.apply(this, arguments)
         },
@@ -2029,6 +2424,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         isCreated: function(){
             return this.__isCreated.apply(this, arguments)
         },
+        
+        getResource: function(){
+            return this
+        },
+        
+        getList: function(){
+            return this
+        },
 
         isBlank: function(){
             return this.__isBlank.apply(this, arguments)
@@ -2044,6 +2447,10 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         
         discover: function(){
             return this.__discover.apply(this, arguments)
+        },
+        
+        asIdentifier: function(){
+            return this.__asIdentifier.apply(this, arguments)
         },
         
         new: function(){
@@ -2144,14 +2551,26 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             var apiClient = settings.apiClient,
                 parent = settings.parent,
                 target = settings.target,
-                data = settings.target;
+                data = settings.data;
             this.__reset_obj(settings.initialContent);
             this.__apiClient  = apiClient;
-            this.__data       = data;
+            this.__config       = data || {};
             this.__parent     = parent;
             this.__target_name= target;
             this.__path       = new Path(parent.path, target, data);
-            this.__updateURILinks();
+            this.__event_handler = {};
+            //this.__updateURILinks();
+        },
+        
+        getConfig: function(name){
+            if (!name) {
+                return $.extend({}, this.__config);
+            }
+            return this.__config[name]
+        },
+
+        getLabel: function(){
+            return this.getConfig('label') || this.__target_name
         },
         
         __load: function(callbackOrSettings){
@@ -2183,7 +2602,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
             if (wrapped === false) {
                 
-                return this.__content
+                return this.__content['json']
             }
             return this
         },
@@ -2212,7 +2631,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             this.__content['json'] = content;
         },
         
-        __update: function(newContent){
+        __update: function(newContent, domElement){
             var $this = this;
             if (JSON.stringify(newContent) === JSON.stringify(this.__content['json'])) {
                 return
@@ -2221,11 +2640,15 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             
             var content = $this.__onGet(false);
             $this.__parent.__update($this.__target_name, content)
-            $this.__updateConnected(content);
+            $this.__updateConnected(content, domElement);
+        },
+        
+        requiresFormData: function(){
+            return ['file upload'].indexOf(this.getConfig('type')) != -1
         },
         
         __save: function(){
-            this.__parent.__save() // todo;__save(this), so patch is possible
+            this.__parent.__save({asFormData: this.requiresFormData()}) // todo;__save(this), so patch is possible
         },
         
         __get_updatedHandler: function($this, autoSubmit){
@@ -2236,7 +2659,7 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 var newContent = domElement.val();
                 
                 if (currentContent != newContent) {
-                    $this.__update(newContent);
+                    $this.__update(newContent, domElement);
                     
                     if (autoSubmit)
                         $this.__save();
@@ -2246,25 +2669,61 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }
         },
         
-        __updateConnected: function(content){            
-            for (var element in this.__domElements) {
-                this.__domElements[element].val(content).change()
+        __updateConnected: function(content, exclude){            
+            for (var index in this.__domElements) {
+                var element = this.__domElements[index];
+                if (exclude && exclude[0] === element[0]) {
+                    continue
+                }
+                $(element).val(content).trigger('change')
             };
         },
         
-        __connect: function(domElement, callback, autoSubmit){
-            domElement = $(domElement);
-            this.__domElements.push(domElement);
+        getFormData: function(){
+            //console.log(this, this.__domElements[0][0].files)
+            // this.__domElements[0][0].files.
+            /*
+             *lastModifiedDate: Fri Feb 01 2013 18:06:29 GMT+0100 (CET)
+            name: "..."
+            size: 1111
+            type: "image/jpeg"
+            webkitRelativePath: ""
+            */
+            // TODO: iterate through all domElements and reset after taking the file?
             
-            domElement.change(this.__get_updatedHandler(this, autoSubmit)); // on('change.introspective-api-object.' + this.__parent.__getID(), 
+            var file = this.__domElements[0][0].files[0];
+            if (this.__domElements[0][0].files.length == 0 || !file) {
+                console.log(this.__domElements[0], file, this);
+                throw Error('no file found')
+            }
+            return file
+        },
+        
+        __connect: function(_domElement, callback, autoSubmit){ // TODO: if domElement is instance of jQuery: get real element
+            var domElement = _domElement instanceof $ ? _domElement : $(_domElement);
+            if (!domElement.attr('id')) {
+                domElement.attr('id', this.asDomId());
+            }
+            
+            this.__domElements.push(domElement);
+            if (this.__config && this.__config.required) {
+                domElement.attr('required', 'required');
+            }
+            if (this.__config && this.__config.read_only) {
+                domElement.attr('disabled', 'disabled');
+                if (!this.__parent.__isCreated()) {
+                    domElement.hide();
+                }
+            }
+            domElement.change(this.__get_updatedHandler(this, autoSubmit, domElement)); // on('change.introspective-api-object.' + this.__parent.__getID(), 
             
             if (this.__parent.__isCreated()) {
                 this.__load(function(result){
-                    domElement.val(result.getContent()).change();
+                    domElement.val(this.__onGet(false)).change();
                     if (callback instanceof Function) {
                         callback(result);
                     }   
-                })
+                }.bind(this))
             }else{
                 if (callback instanceof Function) {
                     callback(result);
@@ -2273,31 +2732,59 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
 
         },
         
-        __disconnect: function(domElement){
+        __disconnect: function(domElement){ // TODO: if domElement is instance of jQuery: get real element
             for (var element in this.__domElements) {
                 if (this.__domElements[element] == domElement) {
                     delete this.__domElements[element];
                 }
             }
-            domElement.val(null);     
-            domElement.off('.introspective-api-object.' + this.__parent.__getID());
+            $(domElement).val(null).off('.introspective-api-object.' + this.__parent.__getID());
             
         },
         
-        __asForm: function(){
-            ret = $('<input type="text">');
-            this.__connect(ret, function(){}, true);
-            return ret           
+        __asForm: function(connect, placeholder, autosubmit){
+            var ret,
+                type = this.getConfig('type') || 'string';
+            if (['string', 'integer'].indexOf(type) != -1 || typeof(type) == 'object'){
+                ret = $('<input type="text" />');
+            }
+            if (type == 'password'){
+                ret = $('<input type="password" />');
+            }
+            if (type == 'file upload'){
+                ret = $('<input type="file" />');
+            }
+            if (!ret){
+                ret = $('<input type="hidden" />');
+            }
+            ret.attr('name', this.__target_name);
+            if (placeholder) {
+                ret.attr('placeholder', this.getLabel())
+            }
+            
+            if (connect !== false)this.__connect(ret, function(){}, autosubmit === undefined ? true : autosubmit);
+            return ret[0]
+        },
+        
+        asDomId: function(){
+            var id = '';
+            if (this.__parent && this.__parent.getID()) {
+                id += String(this.__parent.getUUID())
+            }else{
+                id += 'TODO_NEW'
+            }
+            id += '.' + this.__target_name;
+            return id
         }
         
     });
     
-    function LinkedResource() {
+    function ApiResource() {
         this.__init.apply(this, arguments);
     };
     
-    $.extend(LinkedResource.prototype, ApiObject.prototype);
-    $.extend(LinkedResource.prototype, {
+    $.extend(ApiResource.prototype, ApiObject.prototype);
+    $.extend(ApiResource.prototype, {
         __update_info: function(){
             ApiObject.prototype.__update_info.apply(this, arguments)
             this.__info.is_resource = true;
@@ -2315,22 +2802,55 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         __isBlank: function(apiClient, parent, target, data){
             return true
         },
+        __init: function(){
+            ApiObject.prototype.__init.apply(this, arguments)
+            this.__init_args = arguments;
+            this.__requested_actions = [];
+        },
+        __store_request: function(action, args, obj){
+            this.__requested_actions.push([action, args, obj])
+        },
+        load: function(){
+            this.__store_request('load', arguments)
+        },
+        get: function(){
+            var obj = new ApiPlaceholder(this.__init_args);
+            this.__store_request('get', arguments, obj)
+            return obj
+        },
+        prepare: function(){
+            this.__store_request('prepare', arguments)
+        },
+        refresh: function(){
+            this.__store_request('refresh', arguments)
+        }
     })
     
-    function LinkedRelationship() {
+    function ApiList() {
         this.__init.apply(this, arguments);
     };
     
-    $.extend(LinkedRelationship.prototype, LinkedResource.prototype);
-    $.extend(LinkedRelationship.prototype, {
+    $.extend(ApiList.prototype, ApiResource.prototype);
+    $.extend(ApiList.prototype, {
         __init: function(settings){
             this.__tempIDs = 0;
             settings.initialContent = settings.initialContent || [];
-            LinkedResource.prototype.__init.apply(this, arguments);
+            ApiResource.prototype.__init.apply(this, arguments);
             this.__lookupList = {};
             // after syncContent might have been initialized with original array,
             // hack the array
             this.__initArray(settings.initialContent);
+        },
+        
+        __parseTarget: function(target, data){
+            if (target == 'self' || this.__info.id_attrs.indexOf(target) != -1) {
+                //target = 'x-detail-view';
+                var id = this.__getID(data);
+                if (id) {
+                    return id
+                }
+            }
+            return ApiResource.prototype.__parseTarget.call(this, target, data)
         },
         
         __update_info: function(){
@@ -2381,7 +2901,11 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
         
         __length: function(){
-            return 0//this.__content.json.length // TODO: check in response for x-records range header
+            return this.__content.json.length // TODO: check in response for x-records range header
+        },
+        
+        length: function(){
+            return this.__length.apply(this, arguments)
         },
         
         __checkContent: function(_target){
@@ -2431,25 +2955,29 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
                 return false
             }
             var isObj = resource.__getID !== undefined;
-            var resourceID = (isObj ? resource.__getID() : resource) || ('!' + this.__tempIDs++); 
+            var resourceID = this.__getID(resource); 
             var commit = true;
             replace = replace === undefined ? true : replace;  // replace makes this list a set
             uncommitted = uncommitted === undefined ? true : uncommitted;
             
+            if (resourceID === undefined) {
+                // a new obj is being created
+                resourceID = '!' + this.__tempIDs++;
+            }
+            
             if (index === undefined) {
-                if (replace && this.__lookupList.hasOwnProperty(resource)) {
-                    index = this.__lookupList[resource];
-                    var oldID = this.__content['json'][index];
+                if (replace && this.__lookupList.hasOwnProperty(resourceID)) {
+                    index = this.__lookupList[resourceID];
+                    var oldID = this.__getID(this.__content['json'][index]);
                     if (oldID != resourceID) {
                         delete this.__objects[oldID];
                     }
                 }else{
-                    //TODO: get index for this sorting
+                    //TODO: get index for this sorting from backend or even from resource?
                     index = -1;
                 }
             }
             if (index === null) {
-                //TODO: put at first position don't get any sorting position
                 index = -1;
                 commit = false;
             }
@@ -2468,9 +2996,8 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
             }else{
                 this.__content['json'][index] = resourceID;
             }
-            this.__lookupList[resource] = index
+            this.__lookupList[resourceID] = index
             if (isObj) {       
-             // todo: uuid => global storage as in __get as well
                 this.__setObj(resourceID, resource);
             }
             
@@ -2497,15 +3024,26 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         __each: function(callback){
             var list = this.__content['json'];
             for (var index in list){
-                var elem = this.__get(undefined, list[index]);
-                elem.__load(callback);
+                if (index == 'totalLength') {
+                    continue
+                }
+                var elem = this.__get('self', list[index]);
+                if (true) {
+                    elem.__discover(callback);
+                }else{
+                    elem.__load({
+                        force: true,
+                        callback: callback
+                    });
+                }
+                
             }
         },
         
         __add: function(obj, uncommitted){
             var isCreated = obj ? obj.isCreated() : false,
                 $this = this;
-            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(add)', 'adding', obj, 'to', this])
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(add)', 'adding', obj, 'to', this, isCreated ? 'as existing resource' : 'as new resource'])
             this.__update(isCreated ? undefined : null, obj, uncommitted);
             if (!isCreated) {
                 obj.bind('post-create', function(event, result){
@@ -2530,7 +3068,14 @@ define(['jquery', 'introspective-api-log', 'json'], function ($, _log, JSON) {
         },
     })
     
+    resources = {
+        Result: ApiResult,
+        Object: ApiObject,
+        Placeholder: ApiPlaceholder,
+        List: ApiList,
+        Attribute: ResourceAttribute,
+        Resource: ApiResource
+    };
     
-    
-    return ApiObject;
+    return resources;
 });

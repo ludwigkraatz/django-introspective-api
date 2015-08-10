@@ -1,23 +1,33 @@
 import re
 import copy
-from urlparse import urlsplit, urlunsplit
-
-from django.http import QueryDict
-from django.utils.http import urlencode
-from django.utils.encoding import iri_to_uri
 from django.utils.datastructures import SortedDict
 from rest_framework.serializers import *
 
 from introspective_api.fields import *
-from introspective_api.reverse import reverse_to_patterns
 
 # last import, because api_settings might be also in rest_framework *inherited* files
 from introspective_api.settings import api_settings
 
 
+def messages(self):
+    if hasattr(self, 'error_dict'):
+        return [self.message_dict]
+    return list(self)
+
+def init(self, *args, **kwargs):
+    return super(NestedValidationError, self).__init__(*args, **kwargs)
+
+
+NestedValidationError.__init__ = init
+NestedValidationError.messages = property(messages)
+
+
 ##
 # TODO - set update_fields when saving a partial updated model
 ##
+
+class _Serializer(object):
+    pass
 
 def _get_headers_fields(bases, attrs):
     fields = [(field_name, attrs.pop(field_name))
@@ -62,14 +72,28 @@ class SerializerOptions(SerializerOptions):
         super(SerializerOptions,self).__init__(meta)
         self.meta_fields = getattr(meta, 'meta_fields', ())
         self.exclude_meta = getattr(meta, 'exclude_meta', ())
+        self.defaults = getattr(meta, 'defaults', {})
 
 
     
 def get_meta_fields(self, *args, **kwargs):
     ret = self.get_all_fields()
-    
     for name in ret.keys():
-        if not isinstance(ret[name], HyperlinkedMetaField):
+        if isinstance(ret[name], _Serializer):
+            serializer = ret.pop(name)
+            for _name, _field in serializer.get_meta_fields().items():
+                if not _name in ret:
+                    ret[_name] = _field
+        elif isinstance(ret[name], PrimaryKeyRelatedField):
+            field = ret[name]
+            model = field.queryset.model
+            if hasattr(model, '_api_endpoint_detail') and getattr(model._api_endpoint_detail, 'view_name', False):
+                endpoint = model._api_endpoint_detail
+                ret[name] = HyperlinkedRelatedView(view_name=endpoint.get_complete_view_name(regular=True))
+                ret[name].initialize(parent=self, field_name=name)
+            else:
+                ret.pop(name)
+        elif not isinstance(ret[name], HyperlinkedMetaField):
             ret.pop(name)
         elif self.opts.meta_fields and name not in self.opts.meta_fields:
             ret.pop(name)
@@ -92,135 +116,32 @@ def get_meta_fields(self, *args, **kwargs):
     
     return ret
 
-def templatize_pattern_str(             pattern_string,             # the URL RegEx
-                                         kwargs_lookup,             # the URL Kwargs dict
-                                                                    # the keys are the URL kwargs
-                                                                    # the values are the field_names
-                                         querystrings,              # querystring params that are mandatory
-                                         defaults,                  # default values when kw lookup misses
-                                                                    # some field
-                                         opt_querystrings=None      # optional querystring args, as pagination
-                                         ):
-    opt_querystrings = opt_querystrings or {}
-    ret_string = pattern_string
-    regex = r'(?:[?P\(<]*)(?P<name>[a-zA-Z0-9_]*)(?:[>\)\[\]\-\._\*]*)'
-    '/(?P<all>\(?P\<(?P<name>[a-zA-Z0-9_]*)>\)[\[\]\-\._\*a-zA-Z0-9_?&%]*)'
-    regex = r'\((.*?)\)'
-    x=0
-    # find groups
-    for match in re.findall(regex, pattern_string):
-        x+=1
-        regex2 = '^\?P<(?P<name>[0-9a-zA-Z_]*)>'
-        name = re.findall(regex2, match)[0]
-        regex_local = r'\(\?P<%s>(.*?)\)' % name
-        
-        if name in kwargs_lookup:
-            ret_string = re.sub(regex_local, '{{{var}}}'.format(var=iri_to_uri(kwargs_lookup[name])), ret_string, 1)
-        elif name in defaults:
-            ret_string = re.sub(regex_local, '{var}'.format(var=iri_to_uri(defaults[name])), ret_string, 1)
-        else: raise Exception, match
-        
-    ret_string = re.sub(r'(^\^)', '', ret_string)
-    ret_string = re.sub(r'(\$$)', '', ret_string)
-    
-    if querystrings:
-        (scheme, netloc, path, query, fragment) = urlsplit(ret_string)
-        query_dict = QueryDict(query).copy()
-        for query_param, query_value in querystrings.iteritems():
-            if query_value in kwargs_lookup:
-                query_dict[query_param] = '{{{val}}}'.format(val=iri_to_uri(kwargs_lookup[query_value]))
-            elif query_value in defaults:
-                query_dict[query_param] = '{val}'.format(val=iri_to_uri(defaults[query_value]))
-            else:
-                raise KeyError, query_value
-        
-        template_string = ''
-        templatized_qs = []
-        
-        for query_param, query_value in opt_querystrings.iteritems():
-            if query_value:
-                query_dict[query_param] = '{val}'.format(val=iri_to_uri(query_value))
-            else:
-                templatized_qs.append(query_param)
-        query = query_dict.urlencode(safe='{}')
-        
-        if templatized_qs:
-            template_expression = '&' if query else '?'
-            template_string = '{{{expression}{query_args}}}'.format(expression=template_expression,query_args=','.join(iri_to_uri(templatized_qs)))
-        
-        ret_string = urlunsplit((scheme, netloc, path, query+template_string, fragment))
-            
-    return ret_string
 
-def field_to_template(self, field, field_name):
-    
-    view_name = field.view_name or field.parent.opts.view_name
-    matching_patterns = reverse_to_patterns(view_name)
-    opt_querystrings = {}
-    querystring_dict = {}
-    
-    val = None
-    for matches, pattern, defaults in matching_patterns:
-        for pattern_string, kwargs in matches:
-            cur_kwargs = {}
-            try:
-                for kwarg in kwargs:
-                    cur_kwarg = kwarg
-                    if field.pk_url_kwarg and cur_kwarg == field.pk_url_kwarg:
-                        cur_kwarg = 'pk'
-                    if field.slug_url_kwarg and cur_kwarg == field.slug_url_kwarg:
-                        cur_kwarg = field.slug_field
-                    if cur_kwarg == 'pk':
-                        cur_kwarg = self.opts.model._meta.pk.name
-                    if field.url_kwarg_lookup and cur_kwarg in field.url_kwarg_lookup:
-                        cur_kwarg = field.url_kwarg_lookup[cur_kwarg]
-                        
-                    # check if all fields for URL buidling are in the response
-                    if cur_kwarg not in self.fields:
-                        if cur_kwarg not in defaults:
-                            raise Exception
-                        
-                    # check if all fields for querystring building are in the response
-                    for field in querystring_dict.items():
-                        if not field in self.fields:
-                            if not field in defaults:
-                                raise Exception
-                            
-                    cur_kwargs[kwarg] = cur_kwarg
-            except:
-                continue
-            
-            if field.pk_query_kwarg:
-                if 'pk' not in cur_kwargs and self.opts.model._meta.pk.name not in cur_kwargs:
-                    if self.opts.model._meta.pk.name in self.fields:
-                        cur_kwargs[self.opts.model._meta.pk.name] = self.opts.model._meta.pk.name
-                    else:
-                        raise KeyError, self.opts.model._meta.pk.name
-                querystring_dict[field.pk_query_kwarg] = self.opts.model._meta.pk.name
-            if field.slug_query_kwarg:
-                if field.slug_field not in cur_kwargs and field.slug_field in self.fields:
-                    cur_kwargs[field.slug_field] = field.slug_field
-                else:
-                    raise KeyError, field.slug_field
-                querystring_dict[field.slug_query_kwarg] = field.slug_field 
-            if field.query_kwarg_lookup:
-                querystring_dict.update(field.query_kwarg_lookup)       
-            
-            val = templatize_pattern_str(pattern,
-                                         kwargs_lookup=cur_kwargs,
-                                         querystrings=querystring_dict,
-                                         defaults=defaults,
-                                         opt_querystrings=opt_querystrings)
-            break
-    if val is None:
-        raise Exception, "'%s' could not be resolved" % field_name
-    return val
+def field_to_template(self, field, field_name, **extra):
+    if hasattr(field, 'to_template'):
+        return field.to_template(field_name, **extra)
+    raise Exception('no valid field')
 
 
-class BaseSerializer(BaseSerializer):
+class BaseSerializer(BaseSerializer, _Serializer):
     __metaclass__ = HeaderSerializerMetaclass
     
     _options_class = SerializerOptions
+
+    def __init__(self, *args, **kwargs):
+        super(BaseSerializer, self).__init__(*args, **kwargs)
+
+        if hasattr(self.context.get('view', None), 'endpoint'):
+            if self.init_data is None:
+                self.init_data = {}
+            self.init_data.update(
+                self.context['view'].endpoint.get_object_presets(
+                    self.context['request'],
+                    *self.context['view'].args,
+                    **self.context['view'].kwargs
+                )
+            )
+
     def get_fields(self, *args, **kwargs):
         ret = super(BaseSerializer,self).get_fields(*args, **kwargs)
         
@@ -235,16 +156,29 @@ class BaseSerializer(BaseSerializer):
     field_to_template = field_to_template
     
     
-class Serializer(BaseSerializer):
-    pass
+class Serializer(BaseSerializer, _Serializer):
+    def __init__(self, *args, **kwargs):
+        super(Serializer, self).__init__(*args, **kwargs)
+
+        if hasattr(self.context.get('view', None), 'endpoint'):
+            if self.init_data is None:
+                self.init_data = {}
+            self.init_data.update(
+                self.context['view'].endpoint.get_object_presets(
+                    self.context['request'],
+                    *self.context['view'].args,
+                    **self.context['view'].kwargs
+                )
+            )
 
 class ModelSerializerOptions(ModelSerializerOptions):
     def __init__(self, meta):
         super(ModelSerializerOptions,self).__init__(meta)
         self.meta_fields = getattr(meta, 'meta_fields', ())
         self.exclude_meta = getattr(meta, 'exclude_meta', ())
+        self.defaults = getattr(meta, 'defaults', {})
     
-class ModelSerializer(ModelSerializer):
+class ModelSerializer(ModelSerializer, _Serializer):
     __metaclass__ = HeaderSerializerMetaclass
     
     _options_class = ModelSerializerOptions
@@ -257,6 +191,22 @@ class ModelSerializer(ModelSerializer):
                     ret.pop(name)
         
         return ret
+
+    def __init__(self, *args, **kwargs):
+        super(ModelSerializer, self).__init__(*args, **kwargs)
+
+        if hasattr(self.context.get('view', None), 'endpoint'):
+            if self.init_data is None:
+                self.init_data = {}
+            elif hasattr(self.init_data, '_mutable'):
+                self.init_data = copy.copy(self.init_data)
+            self.init_data.update(
+                self.context['view'].endpoint.get_object_presets(
+                    self.context['request'],
+                    *self.context['view'].args,
+                    **self.context['view'].kwargs
+                )
+            )
     
     get_meta_fields = get_meta_fields
     field_to_template = field_to_template
@@ -267,12 +217,30 @@ class HyperlinkedModelSerializerOptions(HyperlinkedModelSerializerOptions):
         super(HyperlinkedModelSerializerOptions,self).__init__(meta)
         self.meta_fields = getattr(meta, 'meta_fields', ())
         self.exclude_meta = getattr(meta, 'exclude_meta', ())
+        self.defaults = getattr(meta, 'defaults', {})
+        self.pk_url_kwarg = getattr(meta, 'pk_url_kwarg', None)
         
-class HyperlinkedModelSerializer(ModelSerializer):
+class HyperlinkedModelSerializer(ModelSerializer, _Serializer):
     __metaclass__ = HeaderSerializerMetaclass
     _default_view_name = '%(model_name)s-detail'
     
-    _options_class = HyperlinkedModelSerializerOptions    
+    _options_class = HyperlinkedModelSerializerOptions
+
+
+    def __init__(self, *args, **kwargs):
+        super(HyperlinkedModelSerializer, self).__init__(*args, **kwargs)
+
+        if hasattr(self.context.get('view', None), 'endpoint'):
+            if self.init_data is None:
+                self.init_data = {}
+            self.init_data.update(
+                self.context['view'].endpoint.get_object_presets(
+                    self.context['request'],
+                    *self.context['view'].args,
+                    **self.context['view'].kwargs
+                )
+            )
+
     def get_fields(self, *args, **kwargs):
         ret = super(HyperlinkedModelSerializer,self).get_fields(*args, **kwargs)
         
@@ -292,7 +260,8 @@ class HyperlinkedModelSerializer(ModelSerializer):
         if '.' not in fields:
             url_field = HyperlinkedIdentityField(
                 view_name=self.opts.view_name,
-                lookup_field=self.opts.lookup_field
+                lookup_field=self.opts.lookup_field,
+                pk_url_kwarg=self.opts.pk_url_kwarg
             )
             ret = self._dict_class()
             ret['.'] = url_field

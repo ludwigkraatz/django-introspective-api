@@ -32,7 +32,7 @@ def get_HawkExceptions_Response(request, exception):
             code="django-introspectiveapi-auth-invalid",
             status=401
         ).finalize_for(request)
-def get_HawkMissing_Response(request, code='AUTH NEEDED'):
+def get_HawkMissing_Response(request, code='AUTHENTICATION MISSING'):
         return ApiResponse(
             {"msg": "HAWK auth needed for API"},
             code=code,
@@ -147,9 +147,15 @@ class HAWK_Authentication(object):
             #    request.api_user = api_user
         else:
             if not (hasattr(request, 'user') and request.user.is_authenticated()):
-                if request.path.startswith("/api/"):
-                    from django.conf import settings
-                    if settings.DEBUG:
+                from django.conf import settings
+                if settings.DEBUG and request.GET.get('test', None) == 'true':
+                    from django.contrib.auth import login, authenticate, get_user_model
+                    # TODO: this is not done
+                    user = get_user_model().objects.latest('pk')
+                    login(request, user)
+                return None
+                if request.path.startswith("/api/me/"):
+                    if False:
                         return None # TODO: fix
                     else:
                         return get_HawkMissing_Response(request)

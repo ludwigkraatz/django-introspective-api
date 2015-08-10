@@ -2,15 +2,16 @@
 Generic views that provide commonly needed behaviour.
 """
 from __future__ import unicode_literals
+from functools import partial
 
-
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied, MultipleObjectsReturned
 from django.core.paginator import Paginator, InvalidPage
 from django.http import Http404
 from django.shortcuts import get_object_or_404 as _get_object_or_404
 from django.utils.translation import ugettext as _
 from rest_framework import views, mixins, exceptions
 from rest_framework.request import clone_request
+from rest_framework.response import Response
 import warnings
 
 from introspective_api.settings import api_settings
@@ -28,7 +29,144 @@ def get_object_or_404(queryset, **filter_kwargs):
         raise Http404
 
 
-class GenericAPIView(views.APIView):
+class ActionView(views.APIView):
+    #def post(self, *args, **kwargs):
+    #    # TODO: this isnt very nice.
+    #    # this only executes, if its NOT an action. but its needed if the ActionMixin is the only mixin, to allow POST methods
+    #    raise Exception('Programming Error: this shouldnt happen')  # TODO
+
+    def get_actions(self, request, instance=None, list_all=False, *args, **kwargs):
+        # {action: {handler: lambda ResponseClass: ResponseClass(), ResponseClass: None}}
+        return {}
+
+    def get_action_config(self, request, action):
+        try:
+            return self.get_actions(request, list_all=True)[action]
+        except KeyError:
+            raise  # TODO
+
+    def execute(self, request, action, *args, **kwargs):
+        if action not in self.get_actions(request, list_all=True):
+            return self.http_method_not_allowed(request, *args, **kwargs)
+
+        config = self.get_action_config(request, action)
+        handler = config.get('handler')
+        ResponseClass = config.get('ResponseClass', api_settings.API_RESPONSE_CLASS)
+        response = handler(
+            request=request,
+            *args,
+            action=action,
+            ResponseClass=ResponseClass,
+            view=self,
+            **kwargs
+        )
+        if not isinstance(response, (Response, ResponseClass)):
+            response = ResponseClass(response)#.finalize_for(request)
+        for header, value in self.get_response_headers(request, *args, **kwargs).items():
+            response[header] = value
+
+        return response
+
+    def get_handler_for(self, request, *args, **kwargs):
+        if request.method.upper() == 'POST' and 'action' in request.GET:
+            return partial(self.execute, action=request.GET['action'])  #(request, request.GET['action'], *args, **kwargs)
+        return super(ActionView, self).get_handler_for(request, *args, **kwargs)
+
+    def metadata(self, request, defaults=None):
+        """
+        """
+        if not isinstance(defaults, dict):
+            defaults = {}
+        action = request.GET.get('action', None)
+        ret = super(ActionView, self).metadata(request)
+        defaults.update(ret)
+
+        if action is None:
+
+            actions = {}
+
+            for name, action in self.get_actions(request).items():
+                options = action.get('options', {})
+                actions[name] = options if not callable(options) else options(request=request, action=name, view=self, defaults=defaults)
+
+            if actions:
+                defaults['actions'] = actions
+        else:
+            ret = self.get_action_config(request, action).get('options', {})
+            ret = ret if not callable(ret) else ret(request=request, action=action, view=self, defaults=defaults)
+            defaults['actions'] = {'POST': ret}
+        return defaults
+
+    def get_response_headers(self, request, status_code=None, serializer=None, object=None, serializer_class=None, **kwargs):
+        serializer_class = serializer.__class__ if serializer else (serializer_class or (self.get_serializer_class() if hasattr(self, 'get_serializer_class') else None))
+        headers = super(ActionView,self).get_response_headers(request, status_code, serializer=serializer, object=object, **kwargs)
+
+        action = request.GET.get('action', None) if request.method in ['POST', 'OPTIONS'] else None
+        for name, config in self.get_actions(request, instance=object or (serializer.object if serializer else None), list_all=True).items():
+            #self.add_link_template_header(headers,
+            #                              name=link_name,
+            #                              uri=uri,
+            #                              rel='action'
+            #                              )
+            self.add_link_header(headers,
+                                  name=name,
+                                  query_lookup={'action': name},
+                                  rel='action',
+                                  uri=''
+                                  )
+            if action == name:
+                if 'links' in config:
+                    for name, value in config['links'].items():
+                        url = None
+                        uri = None
+                        rel = None
+                        query_lookup = None
+                        if isinstance(value, basestring):
+                            uri = value
+                        else:
+                            if value['as_query']:
+                                query_lookup = {'action': action}
+                                query_lookup[name] = value['as_query'] if value['as_query'] is not True else None
+                                uri = ''
+                            rel = value.get('rel', rel)
+                            uri = value.get('uri', uri)
+                            url = value.get('url', url)
+                        self.add_link_header(headers,
+                                      name=name,
+                                      query_lookup=query_lookup,
+                                      rel=rel,
+                                      uri=uri,
+                                      url=url
+                                      )
+
+                if 'link_templates' in config:
+                    for name, value in config['link_templates'].items():
+                        url = None
+                        uri = None
+                        rel = None
+                        query_lookup = None
+                        if isinstance(value, basestring):
+                            uri = value
+                        else:
+                            if value['as_query']:
+                                query_lookup = {'action': action}
+                                query_lookup[name] = value['as_query'] if value['as_query'] is not True else ('{' + name + '}')
+                                uri = ''
+                            rel = value.get('rel', rel)
+                            uri = value.get('uri', uri)
+                            url = value.get('url', url)
+                        self.add_link_template_header(headers,
+                                          name=name,
+                                          query_lookup=query_lookup,
+                                            rel=rel,
+                                            uri=uri,
+                                            url=url
+                                          )
+
+        return headers
+
+
+class GenericAPIView(ActionView):
     """
     Base class for all other generic views.
     """
@@ -55,6 +193,7 @@ class GenericAPIView(views.APIView):
 
     # The filter backend classes to use for queryset filtering
     filter_backends = api_settings.DEFAULT_FILTER_BACKENDS
+    use_endpoint_filter = True
 
     # The following attributes may be subject to change,
     # and should be considered private API.
@@ -69,6 +208,16 @@ class GenericAPIView(views.APIView):
     slug_field = 'slug'
     allow_empty = True
     filter_backend = api_settings.FILTER_BACKEND
+
+    def get_actions(self, request, *args, **kwargs):
+        actions = None
+        if self.model and hasattr(self.model, 'get_api_actions'):
+            try:
+                instance = self.get_object()
+            except:
+                instance = None
+            actions = self.model.get_api_actions(request=request, instance=instance, *args, **kwargs)
+        return actions or super(GenericAPIView, self).get_actions(request, *args, **kwargs)
 
     def get_serializer_context(self):
         """
@@ -288,12 +437,15 @@ class GenericAPIView(views.APIView):
         else:
             pass  # Deprecation warning
 
-        filter_kwargs = self.endpoint.get_object_filter(self.request, *self.args, **self.kwargs)
+        if self.endpoint and self.use_endpoint_filter:
+            filter_kwargs = self.endpoint.get_object_filter(self.request, *self.args, **self.kwargs)
+        else:
+            filter_kwargs = self.kwargs
 
         if not filter_kwargs:
             raise ImproperlyConfigured(
                 'Expected view %s to be called with a list of field lookups'
-                '"%s" could not be translated accordingly. You migh wanna set the "parent_field" attribute of this endpoint.' %
+                '"%s" could not be translated accordingly. You migh want to set the "parent_field" attribute of this endpoint.' %
                 (self.__class__.__name__, str(self.kwargs))
             )
 
@@ -350,7 +502,7 @@ class GenericAPIView(views.APIView):
         We override the default behavior, and add some extra information
         about the required request body for POST and PUT operations.
         """
-        ret = super(GenericAPIView, self).metadata(request)
+        ret = {}
 
         actions = {}
         for method in ('PUT', 'POST'):
@@ -364,7 +516,7 @@ class GenericAPIView(views.APIView):
                 # Test object permissions
                 if method == 'PUT':
                     self.get_object()
-            except (exceptions.APIException, PermissionDenied, Http404):
+            except (exceptions.APIException, PermissionDenied, Http404, MultipleObjectsReturned):
                 pass
             else:
                 # If user has appropriate permissions for the view, include
@@ -372,26 +524,23 @@ class GenericAPIView(views.APIView):
                 serializer = self.get_serializer()
                 actions[method] = serializer.metadata()
 
-        for name, action in self.get_actions(request).items():
-            actions[name] = action
+        if 'DELETE' in self.allowed_methods:
+            cloned_request = clone_request(request, 'DELETE')
+            try:
+                # Test global permissions
+                self.check_permissions(cloned_request)
+                self.get_object()
+            except (exceptions.APIException, PermissionDenied, Http404, MultipleObjectsReturned):
+                pass
+            else:
+                actions['DELETE'] = None
 
         if actions:
-            ret['actions'] = actions
+            if not 'actions' in ret:
+                ret['actions'] = {}
+            ret['actions'].update(actions)
 
-        return ret
-
-    def get_actions(self, request):
-        return {}
-
-    def execute(self, request, action, *args, **kwargs):
-        if action not in self.get_actions(request):
-            return self.http_method_not_allowed(request, *args, **kwargs)
-        return api_settings.API_RESPONSE_CLASS(status=404).finalize_for(request)  # TODO
-
-    def dispatch(self, request, *args, **kwargs):
-        if request.method.upper() == 'POST' and 'action' in request.GET:
-            return self.execute(request, request.GET['action'], *args, **kwargs)
-        return super(GenericAPIView, self).dispatch(request, *args, **kwargs)
+        return super(GenericAPIView, self).metadata(request, defaults=ret)
 
 
 ##########################################################

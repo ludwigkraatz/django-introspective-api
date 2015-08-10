@@ -1,5 +1,6 @@
-define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', 'hawk'], function ($, ApiObject, _log, JSON2) {
-    
+define(['jquery', 'introspective-api-resources', "introspective-api-log", "introspective-api-auth", 'json'], function ($, apiResources, _log, AuthProvider, JSON2) {
+    var ApiObject = apiResources.Object,
+        ApiResult = apiResources.Result;
     function ApiClientEvent() {
         this.init.apply(this, arguments)
     }
@@ -22,44 +23,77 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
     };
     
     /* prototype extension */
-    $.extend(ApiClient.prototype, {        
-        counter:0,
-        max_priority:4,
-        at_once:5,
-        active:0,
-        priotirized_requests:{
-                0:[],
-                1:[],
-                2:[],
-                3:[],
-                4:[]
+    $.extend(ApiClient.prototype, {
+        
+        get_known_endpoints: function(){
+            return this.getApiOptions().getResponse().endpoints
         },
-        priotirized: false,
-        queue : {},
-        dependencies : {},
-        is_active : {},
-        deferredQueue: [],
         
-        sitemap: null,
-        endpoint: null,
+        map_endpoint: function(request, settings){
+            var endpoints = this.get_known_endpoints();
+            var parsed = this.parseEndpoint(request.uri || request.url),
+                root = this.root_url;
+            
+            if (root.indexOf(parsed.host) == -1) {
+                root = '://' + parsed.host + root;
+            }
+            var url = request.url || (root + request.uri),
+                endpoint = url.substr(url.indexOf(root) + root.length);
+            if (endpoint.indexOf('/')) {
+                endpoint = endpoint.substr(0, endpoint.indexOf('/'))
+            }
+            return endpoints[endpoint]
+        },
         
-        additional_headers: [],
-        default_headers: [],
-        crossDomain: null,
+        requires_auth: function(request, settings){
+            endpoint = this.map_endpoint(request, settings)
+            return endpoint ? endpoint.authenticated : true  // TODO? what if endpoint not found?
+        },
         
-        locked: false,
-        running: false,
-        consumerToken: null,
-        csrftoken: null,
+        is_restricted: function(request, settings){
+            endpoint = this.map_endpoint(request, settings)
+            return endpoint ? endpoint.restricted : true  // TODO? what if endpoint not found?
+        },
+
+        is_locked: function(request, settings){
+            if (this.locked_restricted && this.is_restricted(request, settings)) {
+                return true  // TODO
+            }
+            if (this.locked_authenticated && this.requires_auth(request, settings)) {
+                return false  // TODO
+            }
+            
+            return this.locked
+        },
         
-        clientTimestamp: +new Date()/1000,
-        backendTimestamp: +new Date()/1000,        
+        lock: function(type){
+            if (!type) {
+                this.locked = true;
+                return
+            }
+            if (type == 'authenticated') {
+                this.locked_authenticated = true;
+                return
+            }
+            if (type == 'restricted') {
+                this.locked_restricted = true;
+                return
+            }
+            throw Error('not implemented')
+        },
         
-        debug_level: 1,        
-         
-        accessId: null,
-        accessSecret: null,
-        accessAlgorithm: null,
+        unlock: function(request, settings, result){
+            if (request === settings === result === undefined) {
+                this.locked = false;
+                return
+            }
+            if (settings.sendAuth && settings.isApiInternal) {
+                this.locked_authenticated = false;
+                return
+            }
+            this.locked_restricted = false;
+            return
+        },
 
         _registeredHandlers: {
             201:{
@@ -79,15 +113,24 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                     }
                 },
             },
+            503:{
+                'INCOMPLETE': {
+                    'obj': null,
+                    'callback': function(context){
+                        retryAfter = jqXHR.getResponseHeader('Retry-After');
+                        return context.methodMap.repeatRequest(retryAfter);
+                    }
+                },
+            },
             401:{
                 'AUTHENTICATION EXPIRED': {
                     'obj': null,
                     'callback': function(context){
-                        if (!context.apiClient.locked) {
+                        if (!context.apiClient.locked_authenticated) {
                             if (context.apiClient.debug_level > 0) {
                                 _log(context.log, 'debug', ['locked, because not authenticated']);
                             }
-                            context.apiClient.lock();
+                            context.apiClient.lock('authenticated');
                             context.apiClient.refreshCredentials({
                                 callback: context.methodMap.processInteraction,
                                 expectsResult: true,
@@ -100,11 +143,11 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 'AUTHENTICATION MISSING': {
                     'obj': null,
                     'callback': function(context){
-                        if (!context.apiClient.locked) {
+                        if (!context.apiClient.locked_authenticated) {
                             if (context.apiClient.debug_level > 0) {
                                 _log(context.log, 'debug', ['locked, because not authenticated']);
                             }
-                            context.apiClient.lock();
+                            context.apiClient.lock('authenticated');
                             /*context.apiClient.refreshCredentials({
                                 callback: context.methodMap.processInteraction,
                                 expectsResult: true,
@@ -119,32 +162,45 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             },
         },
         
-        getSitemap: function(callback){
+        api_options: undefined,
+
+        getApiOptions: function(callback){
+            
             var $this = this;
-            if (this.sitemap === null) {
+            if (!this.api_options) {
                 if (callback == undefined) {
-                    _log(this.__log, 'error', ['api endpoint wasn\'t initialized']);
-                    throw Error('api endpoint wasnt initialized');
+                    _log(this.__log, 'error', ['api endpoint wasn\'t initialized and no callback given']);
+                    throw Error('api endpoint wasnt initialized and no callback given');
                 }
                 this.add_urgent({
                     uri: '/',
                     type: 'OPTIONS',
                     ignoreLock: true,
+                    raw: true,
                     isApiInternal: true,
-                    done: function(response, status, jqXHR){
-                        $this.sitemap = response;
-                        callback($this.sitemap.links);
+                    done: function(result){
+                        $this.api_options = result;
+                        callback($this.api_options);
                     }
                 })
                 return false;
             }
             else{
                 if (callback == undefined) {
-                        return this.sitemap.links
+                        return this.api_options
                     }
-                callback(this.sitemap.links);
+                callback(this.api_options);
                 return true;    
             }
+        },
+        
+        getSitemap: function(callback){
+            if (callback) {
+                return this.getApiOptions(function(options){
+                    callback(options.getContent().links)
+                })
+            }
+            return this.getApiOptions().getContent().links
         },
         
         initialize: function(callback){
@@ -155,153 +211,34 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             })
         },
         
-        getCorrectTimestamp: function(){
-            return Math.round(+new Date()/1000) - this.clientTimestamp + this.backendTimestamp;
-        },
-        
         setLanguage: function(languageCode){
             this.default_headers['Accept-Language'] = languageCode;
         },
         
-        signRequest: function(request, ajax_settings){
-            // Generate Authorization request header
-            var auth = ajax_settings.auth;
-            var data = {};
-            var payload = {};
-            //delete settings.data;
-            _log(ajax_settings.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiClient)', '(resquest)', 'signing', request, 'with', ajax_settings])
-                
-            
-            var data_values = new Array();
-            
-            for (key in request.data) {
-                data_values.push(key);
-            }
-            
-            if (data_values.length > 0) {
-                data_values.sort();
-            
-                for (key in data_values) {
-                    data[data_values[key]] = request.data[data_values[key]]
-                }
-                
-                $.extend(payload, data);
-            }else{
-                data = null;
-            }
-            
-            request.data = data;
-            var options = {
-                credentials: auth.auth_callback ? auth.auth_callback() : {
-                    id: auth.accessId,
-                    key: auth.accessSecret,
-                    algorithm: auth.accessAlgorithm
-                },
-                //ext: 'some-app-data',
-                contentType: request.dataType,
-                timestamp: this.getCorrectTimestamp(),
-            };
-            if (data && true) {                    
-                options.payload= JSON2.stringify(payload);
-            }
-            
-            var result = hawk.client.header(
-                request.url,
-                request.type,
-                options
-                );
-            if (result.field && result.artifacts) {
-                request.headers.Authorization = result.field;
-                auth.artifacts = result.artifacts;
-            }else if (options.credentials.id && options.credentials.key && options.credentials.algorithm){
-                _log(ajax_settings.log || this__log, 'error', ['error encrypting']);
-                throw Error, 'error encrpyting' //todo make global error handler catch this
-            }
-            
-            
-            return request;
-        },
-        
-        
-        checkResponse: function(xhr, settings, response){
-            
-            // Check Server Response
-            var log = settings.log,
-                auth = settings.auth;
-            var artifacts = auth.artifacts;
-            delete auth.artifacts;
-            var credentials= auth.auth_callback ? auth.auth_callback() : {
-                    id: auth.accessId,
-                    key: auth.accessSecret,
-                    algorithm: auth.accessAlgorithm
-                };                    
-            var options = {
-                payload: xhr.responseText ? xhr.responseText : ""
-                };
-            
-            if (this.debug_level > 0){
-                // TODO: don't log accessSecret
-                _log(log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiClient)', '(Response)', 'authenticating XHR:', xhr, 'with settings:', settings, 'options:', options, 'and response:', response])
-            }
-            return hawk.client.authenticate(
-                xhr, credentials, artifacts, options
-                );
-            
-        },
         
         getProtocol: function(settings){
             return 'http://' // 'https://'
         },
         
-        ajax_apiInternal: function( request, ajax_settings){
-            var $this = this,
-                uri = true;
-            var ajax = {
-                "global": false,
-                "headers": {},
-                "url": request.uri ? (this.endpoint + request.uri) : request.url,
-            };
-            prefix = this.getProtocol(ajax_settings) + this.host + this.endpoint
-            if (ajax.url.indexOf(prefix) == 0) {
-                uri = false;
-            }else if (ajax.url.indexOf('://') != -1) {
-                throw Error('not allowed')
-            }
-            
-            delete request.uri;
-            
-            $.extend(ajax.headers, this.default_headers);
-            $.extend(ajax, request);
-            $.extend(ajax.headers, this.additional_headers);
-            
-            if (this.consumerToken ) {
-                $.extend(ajax.headers, {
-                    "X-ConsumerToken": this.consumerToken                    
-                }); 
-            }else
-            if (this.csrftoken ) {
-                $.extend(ajax.headers, {
-                    "X-CSRFToken": this.csrftoken                    
-                }); 
-            }
-
-            
-            var url = ajax.url.replace('//', '/');
-            
-            if (this.crossDomain) {
-                ajax.crossDomain = true;
-            }
-            if (uri) {
-                ajax.url = this.host + ajax.url;
-                
-                ajax.url = this.getProtocol(ajax_settings) + ajax.url.replace('//', '/');
-            }
+        ajax_apiInternal: function( ajax, ajax_settings, id){
+            process_data = true;
             
             // signing the request if accessId available
-            if (ajax_settings.auth.accessId) { // TODO: set ajax_settings.auth after this.__locked might be set to true (after authentication)
-                ajax_settings.auth._needsAuthentication = true;
-                ajax = this.signRequest(ajax, ajax_settings);
-            }else if (['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && (ajax.dataType == 'json' || ajax.data instanceof Object)) {
+            if (typeof(ajax_settings.auth.isAuthenticated)=='function') {
+                var is_authenticated = ajax_settings.auth.isAuthenticated();
+                if (is_authenticated) {
+                    process_data = false;
+                    ajax = ajax_settings.auth.sign('jQuery', {'request': ajax, 'settings': ajax_settings});
+                }else if (is_authenticated === undefined && ajax_settings.sendAuth !== true && this.requires_auth(ajax, ajax_settings)){
+                    auth_id = ajax_settings.auth.refresh();
+                    this.defereRequest(id, auth_id)
+                    return undefined
+                }
+            }else if (ajax_settings.auth.accessId || ajax_settings.auth.profileId) {
+                ajax_settings.auth.validateResponse = true;
+                ajax = AuthProvider.sign_jQueryRequest(ajax, ajax_settings);
+            }
+            if (process_data && ['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && (ajax.dataType == 'json' || ajax.data instanceof Object)) {
                 ajax.data = JSON.stringify(ajax.data);
                 ajax.contentType = 'application/json; charset=utf-8';
                 delete ajax.dataType;
@@ -311,15 +248,19 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             if (this.debug_level > 0)
                 // TODO: don't log accessSecret
                 _log(ajax_settings.log || this.__log, 'debug', ['(info)', '[Introspective ApiClient]', 'request:', ajax, 'with settings', ajax_settings]);
-            var jqxhr = this.ajax(ajax);
+            var jqxhr = this.ajax(ajax, id);
             
-            if (ajax_settings.auth._needsAuthentication) {
+            if (ajax_settings.auth.validateResponse) {
                 jqxhr.done(function(response, status, xhr){
-                    ajax_settings.auth._isAuthenticatedResponse = $this.checkResponse(xhr, ajax_settings, response);
+                    if (ajax_settings.auth.ensure_validation) { // TODO: validate allways, not just on done()?
+                        ajax_settings.auth.ensure_validation('jQuery', {'xhr': xhr, 'settings': ajax_settings})
+                    }else{
+                        ajax_settings.auth.responseValid = AuthProvider.validate_jQueryXHR(xhr, ajax_settings);
+                    }
                 }) 
             }
             
-            jqxhr.url = url;
+            jqxhr.url = ajax.url;
             
             return jqxhr;
         },
@@ -342,41 +283,96 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             return true
         },
         
-        ajax: function(request){
+        ajax: function(request, id){
             return $.ajax(request)
         },
-        
-        lock: function(){
-            this.locked = true;
-        },
-        
-        unlock: function(){
-            this.locked = false;
-        },
     
-    
-        init: function(settings){
-            this.__event_handler = {};
-            var tmp = settings.endpoint.split('://');
+        parseEndpoint: function(endpoint){ // TODO: in the hawk lib is a nice regex
+            var tmp = endpoint.split('://'),
+                host,
+                endpoint,
+                protocol;
             if (tmp.length == 1) {
                 tmp = tmp[0];
-                this.protocol = null;
+                protocol = null;
             }else{
                 tmp = tmp[1];
-                this.protocol = tmp[0];
+                protocol = tmp[0];
             }
             var tmp2 = tmp.split("/");
 
             if (tmp2[0] == '') {
-                this.host = 'localhost:8001'; // TODO: get current host
+                host = window.location.hostname + (window.location.port ? ':' + window.location.port: '');
             }else {
-                this.host = tmp2[0];
+                host = tmp2[0];
                 delete tmp2[0];
             }
+            endpoint = tmp2.join('/');
+            if (endpoint[endpoint.length -1] == '/') {
+                endpoint = endpoint.slice(0, - 1);
+            }
+            return {
+                host: host,
+                endpoint: endpoint,
+                protocol: protocol
+            }
+        },
+        
+        __reset: function(){      
+            this.counter = 0;
+            this.max_priority = 4;
+            this.at_once = 5;
+            this.active = 0;
+            this.priotirized_requests = {
+                    0:[],
+                    1:[],
+                    2:[],
+                    3:[],
+                    4:[]
+            };
+            this.priotirized = false;
+            this.queue = {};
+            this.dependencies = {};
+            this.is_active = {};
+            this.deferredQueue = [];  // after lock()
+            this.deferredLookup = {};
+            
+            this.sitemap = null;
+            this.endpoint = null;
+            
+            this.additional_headers = [];
+            this.default_headers = [];
+            this.crossDomain = null;
+            
+            this.locked_restricted = false;
+            this.locked_authenticated = false;
+            this.locked = false;
+            this.running = false;
+            this.consumerToken = null;
+            this.csrftoken = null;    
+            
+            this.debug_level = 1;
+        },
+    
+        init: function(settings){
+            this.__reset()
+            this.__event_handler = {};
             this.__log = settings.log;
-            _log(this.__log, 'debug', ['(init)', '[Introspective ApiClient]', 'settings:', settings, 'host:', this.host]);
-            this.endpoint = tmp2.join('/');
-            this.crossDomain = settings.crossDomain;
+            this.host = settings.host || this.host;
+            this.cache = settings.cache;
+            if (this.host) {
+                this.crossDomain = this.host.isCrossDomain();
+                this.root_url = this.host.get_root()
+            }else{
+                var endpoint = this.parseEndpoint(settings.endpoint)
+                this.root_url = settings.endpoint;
+                this.host = endpoint.host;
+                this.endpoint = endpoint.endpoint;
+                this.protocol = endpoint.protocol;
+                this.crossDomain = settings.crossDomain;
+            }
+            _log(this.__log, 'debug', ['(init)', '[Introspective ApiClient]', 'settings:', settings, 'host:', this.host, this]);
+            
             
             
             cookie  = this.getCookie('consumerToken');
@@ -392,6 +388,10 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             }else{
                 this.consumerToken = cookie;
             }
+        },
+        
+        getCache: function(){
+            return this.cache
         },
     
         /*
@@ -465,6 +465,21 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 settings.ignoreLock = request.ignoreLock
                 delete request.ignoreLock
             }
+            if (request.cache != undefined) {
+                settings.cache = request.cache
+                delete request.cache
+            }
+            if (request.source != undefined) {
+                settings.source = request.source
+                delete request.source
+            }
+            if (request.signPayload != undefined) {
+                settings.signPayload = request.signPayload
+                delete request.signPayload
+            }
+            if (request.uri && !request.url) {
+                request.isApiInternal = true  // TODO: if this.endpoint
+            }
             if (request.isApiInternal != undefined) {
                 settings.isApiInternal = request.isApiInternal
                 delete request.isApiInternal;
@@ -472,11 +487,22 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 if (settings.isApiInternal) {
                     settings.auth = settings.auth || request.auth || {};
                     delete request.auth;
-                    
-                    settings.auth.accessId = settings.auth.accessId || this.accessId;
-                    settings.auth.accessSecret = settings.auth.accessSecret || this.accessSecret;
-                    settings.auth.accessAlgorithm = this.accessAlgorithm;
+                    if (!settings.auth) {
+                        this.patchAuth(settings);
+                    }
                 }
+            }
+            if (request.auth) {
+                settings.auth = request.auth ;
+                delete request.auth;
+            }
+            if (request.raw !== undefined) {
+                settings.raw = request.raw ;
+                delete request.raw;
+            }
+            if (request.log !== undefined) {
+                settings.log = request.log ;
+                delete request.log;
             }
             
             if (request.fail != undefined) {
@@ -484,8 +510,8 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 delete request.fail
             }
             
-            if (this.dependencies[id]){
-                this.handleDependencies(id)
+            if (this.dependencies[id]){ // abort dependencies that are registered for this request id - e.g. for recurrent requests
+                this.abortDependencies(id)  // TODO: this needs to be clarified... ??
             }
             if (priority==undefined)
                 priority=this.max_priority
@@ -494,10 +520,74 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 if (this.queue[id].priority<priority)
                     delete this.priotirized_requests[priority][$.inArray(id,this.priotirized_requests[priority])]
             }
+            
+            if (typeof(this.host) != 'string') {
+                this.host.prepareRequest('jQuery', request, settings);
+            }
+            
+            if (settings.isApiInternal) {
+                var $this = this,
+                    uri = true,
+                    ajax = {
+                        "global": false,
+                        "headers": {},
+                    };;
+                if (typeof(this.host) != 'string') {
+                    // request was prepared by the host. so skip it now
+                    uri = false;
+                }else{
+                    ajax.url = request.uri ? (this.endpoint + (request.uri[0] != '/' ? '/' : '') + request.uri) : request.url,
+                    prefix = this.getProtocol(settings) + this.host + this.endpoint
+                    if (ajax.url.indexOf(prefix) == 0) {
+                        uri = false;
+                    }else if (ajax.url.indexOf('://') != -1) {
+                        throw Error('not allowed')
+                    }
+                    
+                    delete request.uri;
+                }
+                
+                
+                $.extend(ajax.headers, this.default_headers);
+                $.extend(ajax, request);
+                $.extend(ajax.headers, this.additional_headers);
+                
+                if (this.consumerToken ) {
+                    $.extend(ajax.headers, {
+                        "X-ConsumerToken": this.consumerToken                    
+                    }); 
+                }else
+                if (this.csrftoken ) {
+                    $.extend(ajax.headers, {
+                        "X-CSRFToken": this.csrftoken                    
+                    }); 
+                }
+                
+                if (this.crossDomain) {
+                    ajax.crossDomain = true;
+                }
+                if (uri) {
+                    ajax.url = this.host + ajax.url;
+                    
+                    ajax.url = this.getProtocol(settings) + ajax.url;
+                }
+                request = ajax;
+            }
+            var result = new ApiResult({apiClient: this, url: request.url, raw: settings.raw, log: settings.log || this.__log});
+            result.registerRequest(id, request, settings);
             this.queue[id]={
                 'settings':settings,
                 'request':request,
                 'callbacks': {},
+                'result': result
+            }
+            var cache = this.getCache();
+            if (settings.cache !== false && cache) {
+                var cached = cache.handle(this.queue[id]);
+                if (cached) {
+                    result.wasCached.apply(result, cached)
+                    throw Error('TODO: implement this.complete(id) from cached')
+                }
             }
 
             /*
@@ -509,12 +599,9 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 this.priotirized_requests[priority].push(id)
             }
             */
-            if ((this.active<this.at_once && priority == 0 && (
-                                            this.locked == false
-                                        ||  settings.ignoreLock
-                                        ))
+            if (((this.active<this.at_once && priority == 0)
                 || !this.priotirized
-            ) {
+            ) && !this.is_locked(request, settings)) {
                 this.start(id);
             }else{
                 if (!this.priotirized_requests[priority]){
@@ -523,7 +610,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 }
                 this.priotirized_requests[priority].push(id)
                 
-                if (this.active<this.at_once && this.locked == false){ // TODO: as complete callback of active requests
+                if (this.active<this.at_once && !this.is_locked(request, settings)){ // TODO: as complete callback of active requests
                     var $this = this;
                     setTimeout(function (){$this.next()}, 10);
                 }
@@ -539,7 +626,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             for (var i=0;i<=this.max_priority;i++){
                 while (this.active<=this.at_once && this.priotirized_requests[i].length>0){
                     cur = this.priotirized_requests[i][this.priotirized_requests[i].length-1]
-                    if (this.locked == false || this.queue[cur].settings.ignoreLock) {
+                    if (!this.is_locked(this.queue[cur].request, this.queue[cur].settings)) {
                         this.start(this.priotirized_requests[i].pop())
                     }else{
                         break; // TODO: find a better way. now ignoreLock requests get missed, because they might not be the latest request
@@ -554,7 +641,7 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         /*
          * aborts dependend requests on e.g. abortion of the related request
          */
-        handleDependencies: function (id){
+        abortDependencies: function (id){
             var queued_ajax=this
             $.each(this.dependencies[id],function(key,value){
                 queued_ajax.abort(value)
@@ -578,8 +665,8 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                     var priority=this.queue[id].settings.priority
                     delete this.priotirized_requests[priority][$.inArray(id,this.priotirized_requests[priority])]
     
-                    //if (this.dependencies[id])
-                    //    this.handleDependencies(id)
+                    if (this.dependencies[id])
+                        this.abortDependencies(id)
     
                     delete this.queue[id]
                 }
@@ -593,23 +680,24 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
          * really starts the ajax request matching the id
          */
         start:function (id){
-    
             // if id has been removed from entry meanwhile, start next
             if (!this.queue[id])
                 return this.next()
     
             this.active+=1;
     
-            var request =   this.queue[id]["request"],
-                settings =  this.queue[id]["settings"];
+            var request =   $.extend({}, this.queue[id]["request"]),
+                settings =  $.extend({}, this.queue[id]["settings"]);
             var $ajax;
             
             if (settings.isApiInternal === true) {
-                $ajax = this.ajax_apiInternal(request, settings)
+                $ajax = this.ajax_apiInternal(request, settings, id)
             }else{
-                $ajax = this.ajax(request);
+                $ajax = this.ajax(request, id);
             }
-            
+            if (!$ajax) {
+                return null
+            }
             this.queue[id]["jqXHR"]=$ajax;
             
             /*$ajax.then(
@@ -684,8 +772,16 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
          */
         _complete: function(id){
             var $this=this;
-                $this.active-=1;
-    
+                $this.active-=1,
+                entry = $this.queue[id],
+                cache = this.getCache();
+                
+                if (entry.settings.cache !== false && cache) {
+                    cache.process(entry);
+                }
+                //if ($this.queue[id].settings.source && $this.queue[id].settings.source.apply) {
+                //    $this.queue[id].settings.source.apply(undefined, undefined, true)
+                //}
                 delete $this.queue[id]
     
                 $this.next()    
@@ -712,22 +808,29 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         _getFailedCallbackHandler: function(id) {
             var apiClient = this;
             return function (jqXHR, statusText, error){
+                var result = apiClient.queue[id].result;
+                result.registerFailure(error, statusText, jqXHR);
+                
+                if (this.deferredQueue.indexOf(id) != -1) {
+                    this.deferredQueue.splice(this.deferredQueue.indexOf(id), 1);
+                }
+                
                 var method = apiClient.queue[id].settings.fail;
                 if (method != undefined){
-                    method(jqXHR, statusText, error)
+                    method(result)
                 }
                 for (var entry in apiClient.queue[id].callbacks.fail) {
-                    apiClient.queue[id].callbacks.fail[entry](jqXHR, statusText, error)
+                    apiClient.queue[id].callbacks.fail[entry](result)
                 }
                 for (var entry in apiClient.queue[id].callbacks.always) {
-                    apiClient.queue[id].callbacks.always[entry](jqXHR, statusText, error)
+                    apiClient.queue[id].callbacks.always[entry](result)
                 }
                 for (var entry in apiClient.queue[id].callbacks.then) {
-                    apiClient.queue[id].callbacks.then[entry](jqXHR, statusText, error)
+                    apiClient.queue[id].callbacks.then[entry](result)
                 }
                 method = apiClient.queue[id].settings.always;
                 if (method != undefined){
-                    method(error, statusText, jqXHR)
+                    method(result)
                 }
                 
                 this.__trigger('failed', [id]);
@@ -738,30 +841,34 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
         _getSuccessCallbackHandler: function(id, methodMap) {
             var apiClient = this;
             return function (response, statusText, jqXHR){
-                if ((!apiClient.queue[id].settings.auth || apiClient.queue[id].settings.auth._needsAuthentication != true) ||
-                    apiClient.queue[id].settings.auth._isAuthenticatedResponse) {
+                var result = apiClient.queue[id].result;
+                if ((!apiClient.queue[id].settings.auth || apiClient.queue[id].settings.auth.validateResponse != true) ||
+                    apiClient.queue[id].settings.auth.responseValid) {
+
+                    result.registerSuccess(response, statusText, jqXHR);
                     
                     var method = apiClient.queue[id].settings.done;
                     if (method != undefined){
-                        method(response, statusText, jqXHR)
+                        method(result)
                     }   
                     for (var entry in apiClient.queue[id].callbacks.done) {
-                        apiClient.queue[id].callbacks.done[entry](response, statusText, jqXHR)
+                        apiClient.queue[id].callbacks.done[entry](result)
                     }
                     for (var entry in apiClient.queue[id].callbacks.always) {
-                        apiClient.queue[id].callbacks.always[entry](response, statusText, jqXHR)
+                        apiClient.queue[id].callbacks.always[entry](result)
                     }
                     for (var entry in apiClient.queue[id].callbacks.then) {
-                        apiClient.queue[id].callbacks.then[entry](response, statusText, jqXHR)
+                        apiClient.queue[id].callbacks.then[entry](result)
                     }   
                     method = apiClient.queue[id].settings.always;
                     if (method != undefined){
-                        method(response, statusText, jqXHR)
+                        method(result)
                     }
                     this.__trigger('succeeded', [id]);
                     return apiClient._complete(id);
                     
                 }else{                
+                    result.registerFailure(response, statusText, jqXHR);
                     _log(apiClient.queue[id].settings.log || this.__log, 'error', ['(IntrospectiveApi)', '(Response)', 'response not valid'])
                     return methodMap.proceedFailure(jqXHR, "Response not valid", 0);
                     
@@ -795,26 +902,45 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             $.extend(this._registeredHandlers, newHandlers);
         },
         
+        defereRequest: function(id, dependency){
+            if (!dependency) {
+                return this.deferredQueue.push(id);
+            }
+            if (!this.deferredLookup[dependency]) {
+                this.deferredLookup[dependency] = [];
+            };
+            this.deferredLookup[dependency].push(id);
+        },
+        
         _get_handler: function(id){
             var apiClient = this;
             
             var methodMap = {};
+            var request = apiClient.queue[id].request,
+                request_settings = apiClient.queue[id].settings,
+                result = apiClient.queue[id].result;
             
-            methodMap.proceedFailure = apiClient._getFailedCallbackHandler(id, methodMap),
-            methodMap.proceedSuccess = apiClient._getSuccessCallbackHandler(id, methodMap),
+            methodMap.proceedFailure = apiClient._getFailedCallbackHandler(id, methodMap);
+            methodMap.proceedSuccess = apiClient._getSuccessCallbackHandler(id, methodMap);
 
             methodMap.processInteraction = function (result){
-                if (result === true) {
-                    apiClient.unlock();
-                    apiClient.handleDeferredRequests();
+                if (result) {
+                    apiClient.unlock(apiClient.queue[id].request, apiClient.queue[id].settings, result);
+                    $.each(apiClient.deferredQueue, function(index, id){
+                        if (apiClient.queue[id].settings.isApiInternal){
+                            apiClient.patchAuth(apiClient.queue[id].settings, request_settings.auth)
+                        }
+                    })
+                    apiClient.handleDeferredRequests(id);
                 }else{
+                    _log(request_settings.log || this.__log, 'error', ['(IntrospectiveApi)', '(processInteraction)', 'result is ', result])
                     methodMap.proceedFailure();
                 }
-            },
+            };
                 
             methodMap.repeatRequest = function (retryAfter) {
                 setTimeout(apiClient.start, parseInt(retryAfter)*1000, id);
-            },
+            };
                 
             methodMap.deferRequest = function(){
                 apiClient.deferredQueue.push(id);
@@ -837,14 +963,21 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                 }
                 
                 var status = jqXHR.status;
-                
+                result.registerXhr(jqXHR);
+
                 var context ={
+                    result: result,
+                    request: request,
+                    settings: request_settings,
                     response: apiClient.translateResponse_toJSON(jqXHR),
                     jqXHR: jqXHR,
                     code: code,
                     
                     apiClient: apiClient,
                     methodMap: methodMap,
+                    auth: request_settings.auth,
+                    source: request_settings.source
+                    
                 }
                 
                 if (apiClient._registeredHandlers[status] != undefined) {
@@ -859,84 +992,186 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
                     
                     }
                 }
+                
+                // if no registered handler for this state was found, proceed either simple success or faliure
                 return proceed()
             }
         },
         
         handleDeferredRequests: function(){
-            while (this.deferredQueue.length>0){
-                this.start(this.deferredQueue.pop())
-            }
+            $.each(this.deferredQueue, function(index, id){
+                if (!this.is_locked(this.queue[id].request, this.queue[id].settings)) {
+                    this.start(id)  // TODO: do it with priorities
+                }
+                
+            }.bind(this))
         },
         
+        patchAuth: function(settings, auth){
+            if (settings.auth) {
+                return true
+            }
+            if (auth) {
+                settings.auth = auth;
+                return true
+            }
+            if (settings.auth === undefined) {
+                settings.auth = {};
+            }
+            throw Error('TODO: implement client.patchAuth()');
+            settings.auth.profileId = settings.auth.profileId || this.profileId;
+            settings.auth.accessId = settings.auth.accessId || this.accessId;
+            settings.auth.accessSecret = settings.auth.accessSecret || this.accessSecret;
+            settings.auth.accessAlgorithm = settings.auth.accessAlgorithm || this.accessAlgorithm;
+            return true
+        },
         
-        setCredentials: function(response) {                
+        setCredentials: function(response) {    
+            throw Error('TODO: implement client.setCredentials()');            
                 this.accessId = response.accessId;
                 this.accessSecret = response.accessSecret;
                 this.accessAlgorithm = response.accessAlgorithm;
                 
         },
+        authentication_url: null,
+        getAuthenticationURL: function(callback){
+            if (!this.authentication_url) {
+                if (!callback) {
+                    throw Error('no authentication url known. provide callback, so that discovering can be done')
+                }
+
+                return this.getApiOptions(function(result){
+                    var links = result.getHeaderLinks(),
+                        auth_url = '';
+                    if (links['login']) {
+                        this.authentication_url = links['login'];
+                    }
+                    var sitemap = this.getSitemap();
+                    if (sitemap['login']) {
+                        this.authentication_url = sitemap['login']['.'];
+                    }else if (sitemap['auth']) {
+                        if (sitemap['auth']['login']) {
+                            this.authentication_url = sitemap['auth']['login']['.'];
+                        }else{
+                            this.add_urgent({
+                                    uri: sitemap['auth']['.'],
+                                    type: 'OPTIONS',
+                                    ignoreLock: true,
+                                    raw: true,
+                                    isApiInternal: true,
+                                    done: function(result){
+                                        var links = result.getHeaderLinks();
+                                        if (links['login']) {
+                                            this.authentication_url = links['login'];
+                                            callback(this.authentication_url)
+                                        }else{
+                                            throw Error('couldnt find login url');
+                                        }
+                                    }.bind(this),
+                                    fail: function(){
+                                        throw Error('couldnt find login url');
+                                    }
+                                })
+                            return false;
+                        }
+                    }else{
+                        throw Error('couldnt find login url');
+                    }
+                    callback(this.authentication_url)
+                }.bind(this))
+            }
+            if (callback) {
+                callback(this.authentication_url)
+                return true
+            }
+            return this.authentication_url
+        },
+        logout_url: null,
+        getLogoutURL: function(callback){
+            if (!this.logout_url) {
+                if (!callback) {
+                    throw Error('no logout url known. provide callback, so that discovering can be done')
+                }
+
+                return this.getApiOptions(function(result){
+                    var links = result.getHeaderLinks(),
+                        auth_url = '';
+                    if (links['logout']) {
+                        this.logout_url = links['logout'];
+                    }
+                    var sitemap = this.getSitemap();
+                    if (sitemap['logout']) {
+                        this.logout_url = sitemap['logout']['.'];
+                    }else if (sitemap['auth']) {
+                        if (sitemap['auth']['logout']) {
+                            this.logout_url = sitemap['auth']['logout']['.'];
+                        }else{
+                            this.add_urgent({
+                                    uri: sitemap['auth']['.'],
+                                    type: 'OPTIONS',
+                                    ignoreLock: true,
+                                    raw: true,
+                                    isApiInternal: true,
+                                    done: function(result){
+                                        var links = result.getHeaderLinks();
+                                        if (links['logout']) {
+                                            this.logout_url = links['logout'];
+                                            callback(this.logout_url)
+                                        }else{
+                                            throw Error('couldnt find login url');
+                                        }
+                                    }.bind(this),
+                                    fail: function(){
+                                        throw Error('couldnt find login url');
+                                    }
+                                })
+                            return false;
+                        }
+                    }else{
+                        throw Error('couldnt find login url');
+                    }
+                    callback(this.authentication_url)
+                }.bind(this))
+            }
+            if (callback) {
+                callback(this.logout_url)
+                return true
+            }
+            return this.logout_url
+        },
         
         refreshCredentials: function(settings){
-            var $this = this,
-                type = 'get',
-                authData = {};
-            if (! settings) {
-                settings = {};
-            }
-            var $this = this;
-            if (this.endpoint == null) {
-                _log(settings.log, 'error', ['refreshing credentials needs the endpoint to be set']);
-                throw Error("Refreshing Credentials needs the endpoint to be set")
-            }
-            
-            if (settings.sendAuth) {
-                authData.username = settings.username;
-                authData.password = settings.password;
-            }
-            
-            if (settings.forceRefresh || settings.sendAuth) {
-                type = 'post';
-            }
-            
-            this.add_urgent({
-                uri: '/auth/login/',
-                type: type,
-                data: authData,
-                /*
-                 * the CSRF header comes from the 'host domain' of this website. it is the consumer key
-                 * (and its validation date),
-                 * signed by the consumer secret. now the introspective api host can check, if this is a request
-                 * for this identified consumer
-                 *
-                 */
-                
-                ignoreLock: true,
-                isApiInternal: true,
-                done: function(response, status, xhr){
-                    $this.setCredentials(response);
-                    if (settings.callback){
-                        if (settings.expectsResult) {
-                            settings.callback({auth: true});
-                        }else{
-                            if (settings.applyThis) {
-                                settings.callback.apply($this)
-                            }else{
-                                settings.callback();
-                            }
-                        }
-                    }
-                },
-                fail: function(xhr, status, error){
-                    if (settings && settings.callback){
-                        if (settings.expectsResult) {
-                            settings.callback({auth: false});
-                        }else{
-                            // if callback doesnt handle result, it shouldn't be called on fail
-                        }
-                    }
-                },
-            })
+            //if (client.endpoint == null) {
+            //    _log(settings.log, 'error', ['refreshing credentials needs the endpoint to be set']);
+            //    throw Error("Refreshing Credentials needs the endpoint to be set")
+            //}
+            this.getAuthenticationURL(function(url){
+                var request;
+                if (settings.auth && settings.auth.provider) {
+                    request = settings.auth.provider.generatejQueryAuthRequest(settings)
+                }else{
+                    request = AuthProvider.generatejQueryAuthRequest(settings)
+                }
+                request.url = url;
+                return this.add_urgent(request, settings);
+            }.bind(this))
+        },
+        
+        logout: function(settings){
+            //if (client.endpoint == null) {
+            //    _log(settings.log, 'error', ['refreshing credentials needs the endpoint to be set']);
+            //    throw Error("Refreshing Credentials needs the endpoint to be set")
+            //}
+            this.getLogoutURL(function(url){
+                var request;
+                if (settings.auth && settings.auth.provider) {
+                    request = settings.auth.provider.generatejQueryLogoutRequest(settings)
+                }else{
+                    request = AuthProvider.generatejQueryLogoutRequest(settings)
+                }
+                request.url = url;
+                return this.add_urgent(request, settings);
+            }.bind(this))
         },
         
         
@@ -964,14 +1199,11 @@ define(['jquery', 'introspective-api-object', "introspective-api-log", 'json', '
             return obj.__onLoad()
         },
         
-        login: function(username, password, callback){
-            return this.refreshCredentials({
-                expectsResult: true,
-                sendAuth: true,
-                username: username,
-                password: password,
-                callback: callback
-            })
+        login: function(settings, callback){
+            settings.callback = callback;
+            settings.expectsResult = true;
+            settings.sendAuth = true;
+            return this.refreshCredentials(settings)
         }
         
     
