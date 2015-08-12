@@ -37,7 +37,7 @@ setup(
     name="introspective-api",
     author="Ludwig Kraatz",
     author_email="code@suncircle.de",
-    version='0.1.23',
+    version='0.1.24',
     packages=find_packages(),
     include_package_data=True,
     package_data=get_package_data('introspective_api'),
