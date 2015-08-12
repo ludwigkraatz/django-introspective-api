@@ -15,6 +15,7 @@ from introspective_api.settings import api_settings
 from django.db.models.fields import Field as BaseDjangoField, AutoField as BaseDjangoAutoField
 import uuid
 import copy
+from functools import partial
 
 
 def templatize_pattern_str(             pattern_string,             # the URL RegEx
@@ -505,6 +506,25 @@ class AutoUUIDField(UUIDField):
         kwargs['blank'] = True
         super(AutoUUIDField, self).__init__(*args, **kwargs)
         self.auto = True
+
+
+
+def new_metadata(self):
+    metadata = SortedDict()
+    metadata['type'] = self.type_label
+    metadata['required'] = getattr(self, 'required', False)
+    optional_attrs = ['read_only', 'label', 'help_text',
+                      'min_length', 'max_length', 'choices']
+    for attr in optional_attrs:
+        value = getattr(self, attr, None)
+        if value is not None and value != '':
+            metadata[attr] = value if isinstance(value, list) else force_text(value, strings_only=True)
+    return metadata
+
+
+ChoiceField.type_label = 'string'
+old_metadata = ChoiceField.metadata
+ChoiceField.metadata = new_metadata
 
 #
 #class DataSerializerField(WritableField):

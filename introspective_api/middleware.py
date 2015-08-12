@@ -7,7 +7,7 @@ from introspective_api.client import InstrospectiveApiException
 from introspective_api.exceptions import ApiKeyNeedsRevalidation, InvalidKey
 import json
 from introspective_api import get_access_key_model, get_consumer_model
-
+from django.core.urlresolvers import reverse
 from django.utils import timezone
 ApiResponse = api_settings.API_RESPONSE_CLASS
 
@@ -33,11 +33,14 @@ def get_HawkExceptions_Response(request, exception):
             status=401
         ).finalize_for(request)
 def get_HawkMissing_Response(request, code='AUTHENTICATION MISSING'):
-        return ApiResponse(
+        ret = ApiResponse(
             {"msg": "HAWK auth needed for API"},
             code=code,
             status=401
         ).finalize_for(request)
+        ret['Location'] = request.build_absolute_uri(reverse('api:profile-auth')) + '?action=authenticate'  # TODO: own login view
+        return ret
+
 def get_ClientException_Response(request, exception):    
     return ApiResponse(
         {"msg": "Internal Server Communication Error", "detail": str(exception.as_html())},
@@ -153,8 +156,8 @@ class HAWK_Authentication(object):
                     # TODO: this is not done
                     user = get_user_model().objects.latest('pk')
                     login(request, user)
-                return None
-                if request.path.startswith("/api/me/"):
+
+                if request.path.startswith("/api/me/") or request.GET.get('private', False):
                     if False:
                         return None # TODO: fix
                     else:

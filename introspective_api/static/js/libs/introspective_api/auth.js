@@ -1,4 +1,4 @@
-define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _log){
+define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'hawk'], function($, JSON2, _log, apiUtils){
     
      // object - keys: profile id. values: access info
     var _auth = {
@@ -27,7 +27,7 @@ define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _
         this.init.apply(this, arguments)
     }
     
-    $.extend(ApiAuth.prototype, {
+    $.extend(ApiAuth.prototype, apiUtils.EventMixin, {
         auto_logout_time: null,  // in seconds
         
         interactionHandler: null,
@@ -38,6 +38,10 @@ define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _
             this.auth_requests = {};
             // set it undefined in internal resets, in order to know if its surely not authenticated or just not tried yet
             this._last_authenticated = {};
+            this.__initEventMixin({
+                'authenticated': {},
+                'logged_out': {}
+            });
         },
         
         update: function(new_auth){
@@ -95,7 +99,8 @@ define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _
                 this.default_host = settings.default_host;
                 delete settings.default_host;
             }
-            this.config = settings
+            this.config = settings;
+            return this
         },
         
         asProxy: function(){
@@ -163,6 +168,7 @@ define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _
                 result.getResponse()['accessSecret'] = null;
                 result.getXhr()['responseText'] = null;
                 result.getXhr()['response'] = null;
+                this.__trigger('authenticated', profile)
             }
             return this
         },
@@ -184,7 +190,7 @@ define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _
             }
             return host.name ? host.name : host
         },
-        
+
         refresh: function(host){
             if (this.proxied) {
                 return this.proxied.refresh.apply(this.proxied, arguments)
@@ -197,7 +203,7 @@ define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _
                     delete settings.host;
                 }
                 host = this.resolveHost(host, settings)
-                
+                settings.auth = this;
                 if (this.auth_requests[host]) {
                     result.request_id = this.auth_requests[host];
                 }else{
@@ -242,7 +248,8 @@ define(['jquery', 'json', "introspective-api-log", 'hawk'], function($, JSON2, _
                 this.hosts[host].logout(settings, function(result){
                     // TODO: delete accessKeys a.s.o.
                     if (callback)callback(result);
-                });
+                    this.__trigger('logged_out')
+                }.bind(this));
             }
             return this
         },

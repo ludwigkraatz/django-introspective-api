@@ -28,6 +28,9 @@ class AbstractBaseConsumer(Model):
     identifier          =   models.TextField(unique=True)
     description         =   models.TextField()
 
+    def asToken(self, **kwargs):
+        return str(self.pk)
+
 class AccessKeyUserWrapper(object):
     def __init__(self, user):
         self.__user = user

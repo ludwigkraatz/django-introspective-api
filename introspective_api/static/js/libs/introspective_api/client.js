@@ -225,7 +225,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             
             // signing the request if accessId available
             if (typeof(ajax_settings.auth.isAuthenticated)=='function') {
-                var is_authenticated = ajax_settings.auth.isAuthenticated();
+                var is_authenticated = ajax_settings.auth.isAuthenticated(ajax_settings.host);
                 if (is_authenticated) {
                     process_data = false;
                     ajax = ajax_settings.auth.sign('jQuery', {'request': ajax, 'settings': ajax_settings});
@@ -238,10 +238,26 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 ajax_settings.auth.validateResponse = true;
                 ajax = AuthProvider.sign_jQueryRequest(ajax, ajax_settings);
             }
-            if (process_data && ['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && (ajax.dataType == 'json' || ajax.data instanceof Object)) {
+            if (process_data && ['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && ((ajax.dataType == 'json' || ajax.data instanceof Object) && (typeof(ajax.data) == 'object'  && ajax.data.__proto__.constructor))){
                 ajax.data = JSON.stringify(ajax.data);
                 ajax.contentType = 'application/json; charset=utf-8';
                 delete ajax.dataType;
+            }
+            
+            if (this.consumerToken ) {
+                $.extend(ajax.headers, {
+                    "X-ConsumerToken": this.consumerToken                    
+                }); 
+            }
+            if (this.requiresCSRFToken(ajax, ajax_settings)) {
+                if (!this.csrftoken) {
+                    $.extend(ajax.headers, {
+                        "X-CSRFToken": this.csrftoken                    
+                    }); 
+                }else{
+                    //throw Error('no csrf protection found, aborting request')  // TODO
+                }
+                
             }
         
             
@@ -363,6 +379,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             if (this.host) {
                 this.crossDomain = this.host.isCrossDomain();
                 this.root_url = this.host.get_root()
+                this.consumerToken = this.host.getConsumerToken();
             }else{
                 var endpoint = this.parseEndpoint(settings.endpoint)
                 this.root_url = settings.endpoint;
@@ -370,28 +387,60 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 this.endpoint = endpoint.endpoint;
                 this.protocol = endpoint.protocol;
                 this.crossDomain = settings.crossDomain;
+                this.consumerToken = settings.consumerToken;
             }
             _log(this.__log, 'debug', ['(init)', '[Introspective ApiClient]', 'settings:', settings, 'host:', this.host, this]);
             
             
             
-            cookie  = this.getCookie('consumerToken');
-            if (!this.crossDomain || cookie === undefined){
-                cookie  = this.getCookie('csrftoken');
-                if (cookie == undefined){
-                    alert("NO COOKIES FOUND");// $this.expnCore.popup('no_cookies_found')
-                    this.lock();
-                }else{
-                    this.csrftoken = cookie;
+            //if (!(this.consumerToken || this.csrftoken)) {
+            //    cookie  = this.getCookie('consumerToken');
+            //    if (!this.crossDomain || cookie === undefined){
+            //        cookie  = this.getCookie('csrftoken');
+            //        if (cookie == undefined){
+            //            alert("NO COOKIES FOUND. Frontend not valid.");
+            //            this.lock();
+            //        }else{
+            //            this.csrftoken = cookie;
+            //        }
+            //        
+            //    }else{
+            //        this.consumerToken = cookie;
+            //    }
+            //}
+            if (!this.consumerToken) {
+                cookie  = this.getCookie('consumerToken');
+                if (cookie){
+                    this.consumerToken = cookie;
                 }
-                
-            }else{
-                this.consumerToken = cookie;
+            }
+            if (!this.crossDomain){
+                this.updateCSRFToken();
             }
         },
         
         getCache: function(){
             return this.cache
+        },
+        
+        updateCSRFToken: function(result){
+            if (!result) {
+                cookie  = this.getCookie('csrftoken');
+                if (cookie){
+                    this.csrftoken = cookie;
+                }
+            }
+        },
+        
+        requiresCSRFToken: function (request, settings) {
+            // these HTTP methods do not require CSRF protection
+            if (/^(GET|HEAD|OPTIONS|TRACE)$/.test(request.type.toUpperCase())){
+                return false;
+            };
+            if (settings && settings.auth && (typeof(settings.auth.isAuthenticated) != 'function' || settings.auth.isAuthenticated(settings.host))) {
+                return false
+            }
+            return true
         },
     
         /*
@@ -552,16 +601,6 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 $.extend(ajax, request);
                 $.extend(ajax.headers, this.additional_headers);
                 
-                if (this.consumerToken ) {
-                    $.extend(ajax.headers, {
-                        "X-ConsumerToken": this.consumerToken                    
-                    }); 
-                }else
-                if (this.csrftoken ) {
-                    $.extend(ajax.headers, {
-                        "X-CSRFToken": this.csrftoken                    
-                    }); 
-                }
                 
                 if (this.crossDomain) {
                     ajax.crossDomain = true;
@@ -1153,6 +1192,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     request = AuthProvider.generatejQueryAuthRequest(settings)
                 }
                 request.url = url;
+                // TODO: this.updateCSRFToken(result)
                 return this.add_urgent(request, settings);
             }.bind(this))
         },

@@ -55,6 +55,10 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
         isCrossDomain: function(){
             return this.host.isCrossDomain.apply(this.host, arguments)
         },
+        
+        getConsumerToken: function(){
+            return this.host.getConsumerToken.apply(this.host, arguments)
+        },
 
         registerInteractor: function(interactor){
             this.interactor = interactor;
@@ -364,6 +368,10 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
             }
             // TODO: is this really the best way? security?
             return this.config.endpoint.indexOf('://' + window.location.host + (window.location.port ? ':' + window.location.port: '')) == -1
+        },
+        
+        getConsumerToken: function(){
+            return this.config.consumerToken
         },
         
         getAuth: function(){

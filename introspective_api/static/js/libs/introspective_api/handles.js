@@ -42,7 +42,7 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
                     state_lookup['primary'] = true;
                 }
                 if (state.filter == 'me') {
-                    state_lookup['private'] = true;
+                    state_lookup['me'] = true;
                 }
                 if (state.filter == 'my') {
                     state_lookup['private'] = true;
