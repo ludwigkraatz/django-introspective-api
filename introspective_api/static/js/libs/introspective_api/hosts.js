@@ -59,6 +59,14 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
         getConsumerToken: function(){
             return this.host.getConsumerToken.apply(this.host, arguments)
         },
+        
+        getCSRFToken: function(){
+            return this.host.getCSRFToken.apply(this.host, arguments)
+        },
+        
+        setCSRFToken: function(){
+            return this.host.setCSRFToken.apply(this.host, arguments)
+        },
 
         registerInteractor: function(interactor){
             this.interactor = interactor;
@@ -372,6 +380,14 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
         
         getConsumerToken: function(){
             return this.config.consumerToken
+        },
+        
+        getCSRFToken: function(){
+            return this.config.csrfToken
+        },
+        
+        setCSRFToken: function(token){
+            this.config.csrfToken = token
         },
         
         getAuth: function(){

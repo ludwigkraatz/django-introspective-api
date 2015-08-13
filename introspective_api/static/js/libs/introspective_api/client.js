@@ -244,18 +244,21 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 delete ajax.dataType;
             }
             
-            if (this.consumerToken ) {
+            if (this.consumerToken) {
                 $.extend(ajax.headers, {
-                    "X-ConsumerToken": this.consumerToken                    
+                    "X-ConsumerToken": typeof(this.consumerToken) == 'function' ? this.consumerToken() : this.consumerToken
                 }); 
             }
             if (this.requiresCSRFToken(ajax, ajax_settings)) {
-                if (!this.csrftoken) {
+                var csrf_token = this.csrftoken;
+                if (typeof(csrf_token) == 'function') {
+                    csrf_token = csrf_token();
+                }
+                
+                if (csrf_token) {
                     $.extend(ajax.headers, {
-                        "X-CSRFToken": this.csrftoken                    
+                        "X-CSRFToken": csrf_token
                     }); 
-                }else{
-                    //throw Error('no csrf protection found, aborting request')  // TODO
                 }
                 
             }
@@ -379,7 +382,8 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             if (this.host) {
                 this.crossDomain = this.host.isCrossDomain();
                 this.root_url = this.host.get_root()
-                this.consumerToken = this.host.getConsumerToken();
+                this.consumerToken = this.host.getConsumerToken.bind(this.host);
+                this.csrftoken = this.host.getCSRFToken.bind(this.host);
             }else{
                 var endpoint = this.parseEndpoint(settings.endpoint)
                 this.root_url = settings.endpoint;

@@ -156,10 +156,15 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
                 this.proxied.refresh.apply(this.proxied, arguments)
             }else{
                 var host = this.resolveHost(undefined, settings, false),
-                profile = result.getResponse().profile;
+                    response = result.getResponse(),
+                    profile = response.profile,
+                    csrf_token = response.csrf_token;
                 this.provider.addProfile(profile, result.getResponse());
                 // TODO: update info
-                this._last_authenticated[host] = [settings.method, +new Date()/1000]
+                this._last_authenticated[host] = [settings.method, +new Date()/1000];
+                if (csrf_token) {
+                    this.hosts[host].setCSRFToken(csrf_token);
+                }
                 this.update(profile);
                 delete this.auth_requests[host];
                 
