@@ -278,7 +278,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             
             if (this.consumerToken) {
                 $.extend(ajax.headers, {
-                    "X-ConsumerToken": typeof(this.consumerToken) == 'function' ? this.consumerToken() : this.consumerToken
+                    "Consumer-Token": typeof(this.consumerToken) == 'function' ? this.consumerToken() : this.consumerToken
                 }); 
             }
             if (this.requiresCSRFToken(ajax, ajax_settings)) {
@@ -289,7 +289,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 
                 if (csrf_token) {
                     $.extend(ajax.headers, {
-                        "X-CSRFToken": csrf_token
+                        "CSRF-Token": csrf_token
                     }); 
                 }
                 

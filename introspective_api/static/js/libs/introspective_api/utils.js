@@ -269,7 +269,7 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
         },
         
         getResponseType: function(){
-            return this.getXhr().getResponseHeader('X-ViewType')
+            return this.getXhr().getResponseHeader('View-Type')
         },
         
         get: function(){

@@ -1593,7 +1593,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                 if (!ranges) {
                     ranges = response['Accept-Ranges']
                 }
-                var viewType = jqXHR.getResponseHeader('X-ViewType');
+                var viewType = jqXHR.getResponseHeader('View-Type');
                 this.__info.ranges = ranges;
                 // TODO: this is not good so far..
                 this.__info.is_list = (ranges ? ranges.indexOf('x-records') != -1 && this.isCreated() : false) || (viewType && viewType == 'List');

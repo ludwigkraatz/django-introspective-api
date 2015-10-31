@@ -48,7 +48,7 @@ DEFAULTS = {
         'x-days'
     ],
     'VIEW_TYPE_HEADER': False,
-    'VIEW_TYPE_HEADER_NAME': 'X-ViewType',
+    'VIEW_TYPE_HEADER_NAME': 'View-Type',
     'VIEW_TYPE_HEADERS': {
         'LIST': 'List',
         'DETAIL': 'Detail'
