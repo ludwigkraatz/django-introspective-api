@@ -37,6 +37,8 @@ DEFAULTS = {
 
     'VALID_URL_PATTERNS_EXPR': '[a-zA-Z0-9\/\-$_.+!*\'(),]*',
     
+    'QUERY_PARAM_PREFIX': '!',
+    
     'PAGINATE_BY_PARAM': 'paginate_by',
     
     'PAGINATION_IN_HEADER': True,
@@ -51,6 +53,8 @@ DEFAULTS = {
         'LIST': 'List',
         'DETAIL': 'Detail'
     },
+
+    'ACTION_QUERY_PARAM': 'action',
     
     'DEFAULT_MODEL_SERIALIZER_CLASS':
         'introspective_api.serializers.ModelSerializer',

@@ -481,24 +481,14 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             var url = this.__asURL(target, data);
             if (url) {
                 if (action !== undefined) {
-                    if (url.indexOf('?') == -1) {
-                        url += '?';
-                    }else{
-                        url += '&';
-                    }
-                    url += 'action=' + action['action'];
+                    url = this.__apiClient.__setSpecialQueryParam(url, 'action', action['action']);
                 }
                 request.url = url
             }else{
                 var uri = this.__asURI(target, data);
                 if (uri) {
                     if (action !== undefined) {
-                        if (uri.indexOf('?') == -1) {
-                            uri += '?';
-                        }else{
-                            uri += '&';
-                        }
-                        uri += 'action=' + action['action'];
+                        uri = this.__apiClient.__setSpecialQueryParam(uri, 'action', action['action']);
                     }
                     request.uri = uri;
                 }else{

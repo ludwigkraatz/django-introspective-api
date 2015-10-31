@@ -30,6 +30,9 @@ def get_object_or_404(queryset, **filter_kwargs):
 
 
 class ActionView(views.APIView):
+    # action settings
+    action_param = api_settings.QUERY_PARAM_PREFIX + api_settings.ACTION_QUERY_PARAM
+
     #def post(self, *args, **kwargs):
     #    # TODO: this isnt very nice.
     #    # this only executes, if its NOT an action. but its needed if the ActionMixin is the only mixin, to allow POST methods
@@ -68,8 +71,8 @@ class ActionView(views.APIView):
         return response
 
     def get_handler_for(self, request, *args, **kwargs):
-        if request.method.upper() == 'POST' and 'action' in request.GET:
-            return partial(self.execute, action=request.GET['action'])  #(request, request.GET['action'], *args, **kwargs)
+        if request.method.upper() == 'POST' and self.action_param in request.GET:
+            return partial(self.execute, action=request.GET[self.action_param])  #(request, request.GET['action'], *args, **kwargs)
         return super(ActionView, self).get_handler_for(request, *args, **kwargs)
 
     def metadata(self, request, defaults=None):
@@ -77,7 +80,7 @@ class ActionView(views.APIView):
         """
         if not isinstance(defaults, dict):
             defaults = {}
-        action = request.GET.get('action', None)
+        action = request.GET.get(self.action_param, None)
         ret = super(ActionView, self).metadata(request)
         defaults.update(ret)
 
@@ -92,16 +95,19 @@ class ActionView(views.APIView):
             if actions:
                 defaults['actions'] = actions
         else:
-            ret = self.get_action_config(request, action).get('options', {})
+            config = self.get_action_config(request, action)
+            ret = config.get('options', {})
             ret = ret if not callable(ret) else ret(request=request, action=action, view=self, defaults=defaults)
             defaults['actions'] = {'POST': ret}
+            if 'name' in config:
+                defaults['name'] = config['name']
         return defaults
 
     def get_response_headers(self, request, status_code=None, serializer=None, object=None, serializer_class=None, **kwargs):
         serializer_class = serializer.__class__ if serializer else (serializer_class or (self.get_serializer_class() if hasattr(self, 'get_serializer_class') else None))
         headers = super(ActionView,self).get_response_headers(request, status_code, serializer=serializer, object=object, **kwargs)
 
-        action = request.GET.get('action', None) if request.method in ['POST', 'OPTIONS'] else None
+        action = request.GET.get(self.action_param, None) if request.method in ['POST', 'OPTIONS'] else None
         for name, config in self.get_actions(request, instance=object or (serializer.object if serializer else None), list_all=True).items():
             #self.add_link_template_header(headers,
             #                              name=link_name,
@@ -110,7 +116,7 @@ class ActionView(views.APIView):
             #                              )
             self.add_link_header(headers,
                                   name=name,
-                                  query_lookup={'action': name},
+                                  query_lookup={self.action_param: name},
                                   rel='action',
                                   uri=''
                                   )
@@ -125,7 +131,7 @@ class ActionView(views.APIView):
                             uri = value
                         else:
                             if value['as_query']:
-                                query_lookup = {'action': action}
+                                query_lookup = {self.action_param: action}
                                 query_lookup[name] = value['as_query'] if value['as_query'] is not True else None
                                 uri = ''
                             rel = value.get('rel', rel)
@@ -149,7 +155,7 @@ class ActionView(views.APIView):
                             uri = value
                         else:
                             if value['as_query']:
-                                query_lookup = {'action': action}
+                                query_lookup = {self.action_param: action}
                                 query_lookup[name] = value['as_query'] if value['as_query'] is not True else ('{' + name + '}')
                                 uri = ''
                             rel = value.get('rel', rel)
@@ -187,7 +193,7 @@ class GenericAPIView(ActionView):
 
     # Pagination settings
     paginate_by = api_settings.PAGINATE_BY
-    paginate_by_param = api_settings.PAGINATE_BY_PARAM
+    paginate_by_param = api_settings.QUERY_PARAM_PREFIX + api_settings.PAGINATE_BY_PARAM
     pagination_serializer_class = api_settings.DEFAULT_PAGINATION_SERIALIZER_CLASS
     page_kwarg = 'page'
 

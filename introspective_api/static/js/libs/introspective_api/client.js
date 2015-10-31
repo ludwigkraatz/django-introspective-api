@@ -50,6 +50,38 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             return endpoint ? endpoint.authenticated : true  // TODO? what if endpoint not found?
         },
         
+        __setSpecialQueryParam: function(url, param, data){
+            // TODO. WIP
+            var prefix = '';
+            if (this.api_options && this.api_options.query_param_prefix) {
+                if (typeof(this.api_options.query_param_prefix) == 'object') {
+                    if (this.api_options.query_param_prefix.hasOwnProperty(param)) {
+                        prefix = this.api_options.query_param_prefix[param];
+                    }else{
+                        var keys = Object.keys(this.api_options.query_param_prefix);
+                        for (var i=0; i < keys.length; i++) {
+                            if (this.api_options.query_param_prefix[keys[i]] == param) {
+                                prefix = keys[i];
+                                break;
+                            }
+                            if (typeof(this.api_options.query_param_prefix[keys[i]]) == 'object' && this.api_options.query_param_prefix[keys[i]].indexOf(param) !== -1) {
+                                prefix = keys[i];
+                                break;
+                            }
+                        }
+                    }
+                }else{
+                    prefix = this.api_options.query_param_prefix;
+                }
+            }
+            if (url.indexOf('?') == -1) {
+                url += '?';
+            }else{
+                url += '&';
+            }
+            return url + prefix + type + '=' + data
+        },
+        
         is_restricted: function(request, settings){
             endpoint = this.map_endpoint(request, settings)
             return endpoint ? endpoint.restricted : true  // TODO? what if endpoint not found?

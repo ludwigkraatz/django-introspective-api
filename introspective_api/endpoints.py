@@ -785,6 +785,8 @@ class APIRoot(ApiEndpointMixin, APIView):
         ret = super(APIRoot, self).options(request, *args, **kwargs)
         ret = ret.data
 
+        ret['query_param_prefix'] = api_settings.QUERY_PARAM_PREFIX;
+
         ret.update(api_root.generate_sitemap(version))
         if api_root.has_endpoints():
             endpoints = {}
