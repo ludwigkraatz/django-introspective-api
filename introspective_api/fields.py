@@ -613,7 +613,7 @@ class DictField(WritableField):
         """
         Dicts of native values <- Dicts of primitive datatypes.
         """
-        into[field_name] = data
+        into[field_name] = data.get(field_name, None)
 
     def field_to_native(self, obj, field_name):
         return getattr(obj, field_name)
