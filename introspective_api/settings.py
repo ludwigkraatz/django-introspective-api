@@ -54,6 +54,8 @@ DEFAULTS = {
         'DETAIL': 'Detail'
     },
 
+    'JSON_ENCODER': 'introspective_api.encoders.AdvancedEncorder',
+
     'ACTION_QUERY_PARAM': 'action',
     
     'DEFAULT_MODEL_SERIALIZER_CLASS':
@@ -95,6 +97,7 @@ IMPORT_STRINGS = ('DEFAULT_MODEL_SERIALIZER_CLASS',
                   'AUTO_UUID_FIELD',
                   'API_CREDENTIALS_VIEW',
                   'STATIC_ENDPOINT_CONFIG',
+                  'JSON_ENCODER'
 )
 
 

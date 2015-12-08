@@ -1,25 +1,12 @@
 from rest_framework.renderers import *
-from rest_framework.utils import encoders
 from django.conf import settings
 #import six
 import json
-from django.db.models.fields.files import FieldFile
-import uuid
+from introspective_api.settings import api_settings
 
 # TODO: https://tools.ietf.org/html/rfc6573 - implement <a href="" rel="item|collection"></a>
 
-
-class AdvancedEncoder(encoders.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, uuid.UUID):
-            return str(obj)
-        if isinstance(obj, FieldFile):
-            return str(obj.url) if obj.name else None
-        # Let the base class default method raise the TypeError
-        return encoders.JSONEncoder.default(self, obj)
-
-JSONRenderer.encoder_class = AdvancedEncoder
-
+JSONRenderer.encoder_class = api_settings.JSON_ENCODER
 
 class PlainTextRenderer(BaseRenderer):
     """
