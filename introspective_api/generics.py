@@ -215,6 +215,18 @@ class GenericAPIView(ActionView):
     allow_empty = True
     filter_backend = api_settings.FILTER_BACKEND
 
+
+    def get_response_headers(self, *args, **kwargs):
+        headers = super(GenericAPIView,self).get_response_headers(*args, **kwargs)
+
+        if api_settings.VIEW_TYPE_HEADER:
+            if kwargs.get('object', None):
+                headers[api_settings.VIEW_TYPE_HEADER_NAME] = api_settings.VIEW_TYPE_HEADERS['DETAIL']
+            else:
+                headers[api_settings.VIEW_TYPE_HEADER_NAME] = api_settings.VIEW_TYPE_HEADERS['LIST']
+
+        return headers
+
     def get_actions(self, request, *args, **kwargs):
         actions = None
         if self.model and hasattr(self.model, 'get_api_actions'):

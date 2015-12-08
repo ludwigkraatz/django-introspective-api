@@ -50,6 +50,7 @@ DEFAULTS = {
     'VIEW_TYPE_HEADER': False,
     'VIEW_TYPE_HEADER_NAME': 'View-Type',
     'VIEW_TYPE_HEADERS': {
+        #'CREATE': 'List',  # TODO..
         'LIST': 'List',
         'DETAIL': 'Detail'
     },
