@@ -1,5 +1,6 @@
 #from introspective_api import authentication as auth
 from introspective_api.settings import api_settings
+from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.utils.functional import SimpleLazyObject
 from django.contrib.auth import get_user_model
@@ -10,7 +11,8 @@ from introspective_api import get_access_key_model, get_consumer_model
 from django.core.urlresolvers import reverse
 from django.utils import timezone
 ApiResponse = api_settings.API_RESPONSE_CLASS
-
+import traceback
+import sys
 import hawk
 
 
@@ -32,13 +34,18 @@ def get_HawkExceptions_Response(request, exception):
             code="django-introspectiveapi-auth-invalid",
             status=401
         ).finalize_for(request)
-def get_HawkMissing_Response(request, code='AUTHENTICATION MISSING'):
-        ret = ApiResponse(
-            {"msg": "HAWK auth needed for API"},
-            code=code,
+def get_HawkExceptions_Response(request, exception):
+    return ApiResponse(
+            {"msg": "Not Authenticated", "detail": "error"},
+            code="django-introspectiveapi-auth-invalid",
             status=401
         ).finalize_for(request)
-        ret['Location'] = request.build_absolute_uri(reverse('api:profile-auth')) + '?action=authenticate'  # TODO: own login view
+def get_SyncNeeded_Response(request, timestamp, code='HAWK TIMESTAMP OUT OF SYNC'):
+        ret = ApiResponse(
+            {"msg": "Your local timestamp needs to be synchronized for this session", "ts": timestamp},
+            code=code,
+            status=400
+        ).finalize_for(request)
         return ret
 
 
@@ -53,7 +60,22 @@ class API_Client_Middleware(object):
     def process_exception(self, request, exception):
         if isinstance(exception, IntrospectiveApiClientException):
             return get_ClientException_Response(request, exception)
-        return None    
+        return None
+
+
+class IntrospectiveApiMiddleware(object): 
+    def process_exception(self, request, exception):
+        if isinstance(exception, InteractionException):
+            return exception.as_response(request)
+        if isinstance(exception, BaseException) and request.path.startswith(api_settings.API_URL):
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            return ApiResponse(
+                {"msg": "%s: '%s'" % (exc_type.__name__, exc_value), "detail": traceback.format_tb(exc_traceback)},
+                code="error",
+                status=500
+            ).finalize_for(request)
+        return None
+
 
 class API_User_Middleware(object):
     def process_request(self, request):
@@ -130,6 +152,8 @@ class HAWK_Authentication(object):
                     api_user.set_artifacts(artifacts)
                     
                     request.api_user = api_user
+                except hawk.server.BadTimingRequest, e:
+                    return get_SyncNeeded_Response(request, e.ts)
                 except hawk.util.HawkException, e:
                     return get_HawkExceptions_Response(request, e)
                     raise#return None # TODO raise Exception?
