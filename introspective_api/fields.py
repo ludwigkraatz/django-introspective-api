@@ -16,6 +16,7 @@ from django.db.models.fields import Field as BaseDjangoField, AutoField as BaseD
 import uuid
 import copy
 from functools import partial
+from introspective_api.exceptions import ResolveError, ResolveKeyError
 
 
 def templatize_pattern_str(             pattern_string,             # the URL RegEx
@@ -48,7 +49,7 @@ def templatize_pattern_str(             pattern_string,             # the URL Re
             ret_string = re.sub(regex_local, '{var}'.format(var=iri_to_uri(defaults[name])), ret_string, 1)
         elif name in kwargs_lookup:
             ret_string = re.sub(regex_local, '{{{var}}}'.format(var=iri_to_uri(kwargs_lookup[name])), ret_string, 1)
-        else: raise Exception, match
+        else: raise ResolveError(match)
         
     ret_string = re.sub(r'(^\^)', '', ret_string)
     ret_string = re.sub(r'(\$$)', '', ret_string)
@@ -62,7 +63,7 @@ def templatize_pattern_str(             pattern_string,             # the URL Re
             elif query_value in kwargs_lookup:
                 query_dict[query_param] = '{{{val}}}'.format(val=iri_to_uri(kwargs_lookup[query_value]))
             else:
-                raise KeyError, query_value
+                raise ResolveKeyError(query_value)
         
         template_string = ''
         templatized_qs = []
@@ -115,6 +116,7 @@ class HyperlinkedMetaField(Field):
                 defaults.update(field.parent.opts.defaults)
             if field.defaults:
                 defaults.update(field.defaults)
+
             for pattern_string, kwargs in matches:
                 cur_kwargs = {}
                 try:
@@ -134,16 +136,16 @@ class HyperlinkedMetaField(Field):
                         # check if all fields for URL buidling are in the response
                         if cur_kwarg not in self.parent.fields:
                             if cur_kwarg not in defaults:
-                                raise Exception
+                                raise ResolveError()
                             
                         # check if all fields for querystring building are in the response
                         for field in querystring_dict.items():
                             if not field in self.parent.fields:
                                 if not field in defaults:
-                                    raise Exception()
+                                    raise ResolveError()
                                 
                         cur_kwargs[kwarg] = cur_kwarg
-                except:
+                except ResolveError:
                     continue
                 
                 if field.pk_query_kwarg:
@@ -151,13 +153,13 @@ class HyperlinkedMetaField(Field):
                         if self.parent.opts.model._meta.pk.name in self.parent.fields:
                             cur_kwargs[self.parent.opts.model._meta.pk.name] = self.parent.opts.model._meta.pk.name
                         else:
-                            raise KeyError, self.parent.opts.model._meta.pk.name
+                            raise ResolveKeyError, self.parent.opts.model._meta.pk.name
                     querystring_dict[field.pk_query_kwarg] = self.parent.opts.model._meta.pk.name
                 if field.slug_query_kwarg:
                     if field.slug_field not in cur_kwargs and field.slug_field in self.parent.fields:
                         cur_kwargs[field.slug_field] = field.slug_field
                     else:
-                        raise KeyError, field.slug_field
+                        raise ResolveKeyError, field.slug_field
                     querystring_dict[field.slug_query_kwarg] = field.slug_field 
                 if field.query_kwarg_lookup:
                     querystring_dict.update(field.query_kwarg_lookup)       
@@ -169,7 +171,7 @@ class HyperlinkedMetaField(Field):
                                              opt_querystrings=opt_querystrings)
                 break
         if val is None:
-            raise Exception, "'%s' could not be resolved" % field_name
+            raise ResolveError("'%s' could not be resolved" % field_name)
         
         request = self.context.get('request', None)
         if request:
@@ -206,7 +208,7 @@ class HyperlinkedIdentityField(HyperlinkedIdentityField, HyperlinkedMetaField):
             defaults.update(self.parent.opts.defaults)
         if self.defaults:
             defaults.update(self.defaults)
-    
+
         lookup_field = getattr(obj, self.lookup_field)
         kwargs = {self.lookup_field: lookup_field}
         kwargs.update(defaults)
