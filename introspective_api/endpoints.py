@@ -803,10 +803,21 @@ class APIRoot(ApiEndpointMixin, APIView):
                 )
             if endpoints:
                 ret['endpoints'] = endpoints
-        #ret['sitemap'] = api_root.generate_sitemap(version)
+        #ret['sitemap'] = api_root.generate_sitemap(version, request=request)
+        headers = {}
 
+        for key, value in api_root.links.items():
+            if isinstance(key, basestring):
+                name = key
+                rel = None
+            else:
+                rel = key[0]
+                name = key[1]
+            api_root.add_link_header(headers, name=name, url=request.build_absolute_uri(value.as_url()), rel=rel)
+        
         return ApiResponse(
-            ret
+            ret,
+            headers=headers
         )
 
     def has_url(self, ):
