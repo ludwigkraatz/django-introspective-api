@@ -16,6 +16,26 @@ import copy
 from functools import partial
 
 
+class EndpointProxy(object):
+    def __init__(self, target_endpoint, **presets):
+        self.__target = target_endpoint
+        self.__presets = presets
+
+    def __getattr__(self, name):
+        return getattr(self.__target, name)
+
+    def as_sitemap_url(self, *args, **kwargs):
+        target_name = self.__target.name
+        with_name = kwargs.get('with_name', target_name)
+        python_formatting = kwargs.get('python_formatting', False)
+        url = self.__target.as_sitemap_url(*args, **kwargs)
+        for key, value in self.__presets.items():
+            url = url.replace(('%%(%s)s' if python_formatting else '{%s}') % key, value)
+            if target_name == key and target_name != with_name:
+                url = url.replace(('%%(%s)s' if python_formatting else '{%s}') % with_name, value)
+        return url
+
+
 class ApiEndpointMixin(object):
     SELECTOR_ENDPOINT = 'select' #TODO: Select should return 0/1, filter many
     FILTER_ENDPOINT = 'filter'
@@ -460,6 +480,9 @@ class ApiEndpoint(ApiEndpointMixin):
         self.depends_on         = config.pop('depends_on', {})
 
         super(ApiEndpoint, self).__init__(**config)
+
+    def as_proxy(self, ENDPOINT_CLASS=EndpointProxy, **kwargs):
+        return ENDPOINT_CLASS(self, **kwargs)
 
     @property
     def model(self):
