@@ -1130,7 +1130,23 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     source: request_settings.source
                     
                 }
-                
+                if (jqXHR.getResponseHeader('Linked-Interaction')) {
+                    // TODO on STATUS 303 with LinkedInteraction.required=true, an automatic redirect should be done that is then handled by interact()
+                    var interactions = apiUtils.parseLinkedInteractions(jqXHR.getResponseHeader('Linked-Interaction'), context.response);
+                    console.log(apiClient);
+                    console.error('apiclient doesnt send interaction requests, but deferres them..?')
+                    if (status == 400 && code == 'INTERACTION NEEDED') {
+                        context.source.interact({
+                            context: context,
+                            interaction: code,
+                            data: interactions,
+                            callback: context.methodMap.processInteraction,
+                            source: context.source
+                        });
+                        // TODO make sure after interaction, the handling process begins here again. so that registeredHandlers on the response are called
+                        return;
+                    }
+                }
                 if (apiClient._registeredHandlers[status] != undefined) {
                     
                     if (apiClient._registeredHandlers[status][code] != undefined){

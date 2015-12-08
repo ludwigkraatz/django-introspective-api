@@ -646,6 +646,22 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
     $.extend(IntrospectiveApiHost.prototype, XhrHost.prototype);
     $.extend(IntrospectiveApiHost.prototype, {
         xhrHandlerMap: {
+                '6NN':{
+                    'INTERACTION REQUIRED': {
+                        'obj': null,
+                        'callback': function(context){
+                            throw Error('TODO')
+                        }
+                    },
+                },
+                400:{
+                    'INTERACTION REQUIRED': {
+                        'obj': null,
+                        'callback': function(context){
+                            throw Error('TODO')
+                        }
+                    },
+                },
                 503:{
                     'INCOMPLETE': {
                         'obj': null,
@@ -669,23 +685,23 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
                 403:{
                     'TOS ACCEPTANCE MISSING':function(context){
                                         if (!context.apiClient.locked_restricted) {
-                                                context.apiClient.lock('restricted');   
-                                            }
-                                            context.this.interact({
-                                                context: context,
-                                                interaction: context.code,
-                                                data: context.response,
-                                                callback: context.methodMap.processInteraction/*function (result){
-                                                    //context.apiClient.refreshCredentials({
-                                                    //    callback: context.methodMap.processInteraction,
-                                                    //    expectsResult: true,
-                                                    //    forceRefresh: false
-                                                    //});
-                                                    context.methodMap.processInteraction(result)
-                                                }*/,
-                                                source: context.source
-                                            })
-                                            return context.methodMap.deferRequest();
+                                            context.apiClient.lock('restricted');   
+                                        }
+                                        context.this.interact({
+                                            context: context,
+                                            interaction: context.code,
+                                            data: context.response,
+                                            callback: context.methodMap.processInteraction/*function (result){
+                                                //context.apiClient.refreshCredentials({
+                                                //    callback: context.methodMap.processInteraction,
+                                                //    expectsResult: true,
+                                                //    forceRefresh: false
+                                                //});
+                                                context.methodMap.processInteraction(result)
+                                            }*/,
+                                            source: context.source
+                                        })
+                                        return context.methodMap.deferRequest();
                     }
                 },
                 401:{
@@ -709,9 +725,26 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
                                             })
                                             return context.methodMap.deferRequest();
                     },
-                    'UNAUTHORIZED': function(context){
-                        return context.methodMap.proceedFailure()
-                    }
+                    'Unauthorized': function(context){
+                                        if (!context.apiClient.locked_authenticated) {
+                                                context.apiClient.lock('authenticated');   
+                                            }
+                                            context.this.interact({
+                                                context: context,
+                                                interaction: context.code,
+                                                data: context.response,
+                                                callback: context.methodMap.processInteraction/*function (result){
+                                                    //context.apiClient.refreshCredentials({
+                                                    //    callback: context.methodMap.processInteraction,
+                                                    //    expectsResult: true,
+                                                    //    forceRefresh: false
+                                                    //});
+                                                    context.methodMap.processInteraction(result)
+                                                }*/,
+                                                source: context.source
+                                            })
+                                            return context.methodMap.deferRequest();
+                    },
                 }
             },
         initEndpoints: function(){

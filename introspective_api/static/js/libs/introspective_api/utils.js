@@ -55,6 +55,33 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
         return links
     };
     utils.parseLinkTemplateHeader = parseLinkTemplateHeader;
+    function parseLinkedInteractions(header, content) {
+
+        var keys = ['source', 'target', 'title', 'type', 'reason', 'data', 'uses_content', 'scope', 'deadline', 'required'];
+
+        var interactionsRegex = /<([a-zA-Z:{}/\-0-9\.?!$&_=%#]*)>(?:; title="([a-zA-Z0-9:/\-?= ]*)")?(?:; type="([a-zA-Z0-9:/\-?= ]*)")?(?:; reason="([a-zA-Z0-9:/\-?= ]*)")?(?:; data="([a-zA-Z0-9:/\-?= ]*)")?(; content=(?:(?:true)|"([a-zA-Z0-9:/\-?= ]*)"))?(?:; scope="([a-zA-Z0-9:/\-?= ]*)")?(?:; deadline="([a-zA-Z0-9:/\-?= ]*)")?(?:; required="([a-zA-Z0-9:/\-_?= ]*)")?,?/g;
+        ///^(?:([^:\/?#]+):)?(?:\/\/((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?))?(((((?:[^?#\/]*\/)*)([^?#]*))(?:\?([^#]*))?)(?:#(.*))?)/;
+        var keyByNumber;
+        var interactions = [];
+
+        while (keyByNumber = interactionsRegex.exec(header)){
+            var i = keys.length;
+            var interaction = {};
+            while (i--) {
+                interaction[keys[i]] = ['required', 'uses_content'].indexOf(keys[i]) !== -1 ? Boolean(keyByNumber[i]) : keyByNumber[i];
+            }
+            if (interaction.uses_content) {
+                if (!content || !interaction.content_identifier) {
+                    interaction.content = content
+                }else{
+                    interaction.content = content[interaction.content_identifier]
+                }
+            }
+            interactions.push(interaction);
+        }
+        return interactions
+    };
+    utils.parseLinkedInteractions = parseLinkedInteractions;
     function isEmpty(obj){
         for (var key in obj) {
             return false
@@ -341,6 +368,10 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
         
         getHeaderLinkTemplates: function(){
             return parseLinkTemplateHeader(this.getXhr().getResponseHeader('Link-Template'));
+        },
+        
+        getLinkedInteractions: function(){
+            return parseLinkedInteractions(this.getXhr().getResponseHeader('Linked-Interaction'));
         },
         
         getSettings: function(){
