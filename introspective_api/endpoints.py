@@ -342,7 +342,7 @@ class ApiEndpointMixin(object):
     def generate_auto_view(cls, api_root, view_config, endpoint_links, **kwargs):
         view_model = view_config.get('model')
         base_view = view_config.get('base_view')
-        serializer_model = kwargs.get('serializer_model', view_model)
+        serializer_model = kwargs.get('serializer_model', None) or view_model
 
         class AutoView(base_view):
             serializer_class = kwargs.get('serializer_cls', None) or cls.default_auto_serializer(serializer_model=serializer_model)
@@ -490,7 +490,7 @@ class ApiEndpoint(ApiEndpointMixin):
         if self.type in [self.FILTER_ENDPOINT, self.SELECTOR_ENDPOINT]:
             self.lookup_fields['self'] = self.as_lookup_field
 
-        #user_field              = config.pop('user_field', None)
+        #user_field              = self.config.pop('user_field', None)
         #if user_field:
         #    self.lookup_fields['user'] = lambda endpoint, request, *args, **kwargs: {user_field: request.user if request.user.is_authenticated() else None}
         #
@@ -531,6 +531,9 @@ class ApiEndpoint(ApiEndpointMixin):
         """
         return self._get_object_data(request, args, kwargs, complete=False)
 
+    def get_lookup_fields(self, ):
+        return self.lookup_fields
+
     def _get_object_data(self, request, args, kwargs, complete=False):
         """
         @brief the object filter is being applied on a "collection" in order to receive a requested object.
@@ -538,7 +541,7 @@ class ApiEndpoint(ApiEndpointMixin):
         """
         filter_kwargs = {}
 
-        for endpoint, lookup_field in self.lookup_fields.items():
+        for endpoint, lookup_field in self.get_lookup_fields().items():
 
             if isinstance(endpoint, basestring):
                 field = lookup_field(endpoint=self, endpoint_name=endpoint, request=request, view_kwargs=kwargs)
@@ -762,14 +765,14 @@ class APIRoot(ApiEndpointMixin, APIView):
         elif action == 'getSitemap':
             version = request.DATA.get('version', '1.0')
             return ApiResponse(
-                api_root.generate_sitemap(version)
+                api_root.generate_sitemap(version, request=request)
             )
 
     def get(self, request, *args, **kwargs):
 
         version = request.GET.get('version', '1.0')
         return ApiResponse(
-            api_root.generate_sitemap(version)
+            api_root.generate_sitemap(version, request=request)
         )
     """
     def get_complete_namespace(self, *args, **kwargs):
@@ -786,7 +789,7 @@ class APIRoot(ApiEndpointMixin, APIView):
 
         ret['query_param_prefix'] = api_settings.QUERY_PARAM_PREFIX;
 
-        ret.update(api_root.generate_sitemap(version))
+        ret.update(api_root.generate_sitemap(version, request=request))
         if api_root.has_endpoints():
             endpoints = {}
             for endpoint in api_root.list_endpoints():
@@ -859,11 +862,13 @@ class APIRoot(ApiEndpointMixin, APIView):
             name=api_settings.API_ROOT_NAME
         )
 
-    def generate_sitemap(self, version):
+    def generate_sitemap(self, version, request=None):
         sitemap = {
             'version': version,
             'links': {}
         }
+        if request:
+            sitemap['links']['.'] = request.build_absolute_uri()
 
         if self.has_endpoints():
             for endpoint in self.list_endpoints():
@@ -871,8 +876,8 @@ class APIRoot(ApiEndpointMixin, APIView):
                     endpoint_sitemap = endpoint.as_sitemap()
                     if endpoint_sitemap is not None:
                         sitemap['links'][endpoint.get_name(for_sitemap=True)] = endpoint_sitemap
-        else:
-            return {}
+        #else:
+            #return {}
 
 
         return sitemap
