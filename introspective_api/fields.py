@@ -502,6 +502,41 @@ class UUIDField(BaseDjangoField):
     
     def as_url(self):
         return base64.urlsafe_b64encode(self.uuid)
+
+
+class UUIDCharField(UUIDField):
+    def get_internal_type(self):
+        return 'CharField'
+
+    def db_type(self, connection):
+        return 'char(36)'
+
+    def to_python(self,value):
+        """
+        @brief returns a uuid version 1
+        """
+        if isinstance(value, basestring):
+            return value
+        else:
+            return str(value) if value else None
+
+    def get_prep_value(self, value):
+        """
+        @brief returns the raw value of the data container
+        """
+        if value is None:
+            return value
+        if not isinstance(value, basestring):
+            value = str(value)
+        if len(value) in [32, 36]:
+            return value
+
+        return None
+    
+    def as_url(self):
+        return base64.urlsafe_b64encode(self.uuid)
+
+
 UuidField = UUIDField
 class AutoUUIDField(UUIDField):
     def __init__(self, *args, **kwargs):
