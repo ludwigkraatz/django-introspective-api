@@ -2,7 +2,7 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
     var utils = {};
 
     
-    utils.LINK_HEADER_TARGETS = ['link', 'relationship'];
+    utils.LINK_HEADER_TARGETS = ['link', 'relationship', 'walk'];
     
     function unpackURL(url, data, resource) {
         if (url.indexOf('{') != -1){

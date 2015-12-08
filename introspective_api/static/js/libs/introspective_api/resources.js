@@ -373,6 +373,9 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                 isApiInternal: true,
                 
             }
+            if (typeof(request.data) == 'object') {
+                request.dataType = 'json';
+            }
             var result = obj.__asResult('create', {data:data, callback:callback});
             request.done = function(_result){
                 result.registerResult(_result);
@@ -532,7 +535,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
         __save: function(callback_or_settings){    
             var $this = this;            
             var apiClient = $this.__apiClient;
-            var todo = 1; // starting at 1!!
+            var todo = 0;
             var sync_obj;
             var settings = typeof(callback_or_settings) == 'function' ? {callback: callback_or_settings}: callback_or_settings || {},
                 isCreated = this.__isCreated();
@@ -549,8 +552,8 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             function finishedOne(childrenResult) {
                 todo -= 1;
                 result.registerResult(childrenResult)
-                if (todo == 0 && callback instanceof Function) {
-                    callback(result);
+                if (todo <= 0 && settings.callback instanceof Function) {
+                    settings.callback(result);
                 }
                 if (isCreated) {
                     $this.__trigger((childrenResult.wasSuccessfull ? 'post' : 'failed') + '-save', [result]);
@@ -573,7 +576,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     //if (!$this.__objects[target].__isCreated()) {
                     //    seperateRequest.push(target);
                     //};
-                if ($this.__objects[target] && !($this.__objects[target] instanceof ResourceAttribute) && !(this instanceof ApiList)) {
+                if ($this.__objects[target] && !($this.__objects[target] instanceof resources.Attribute) && !(this instanceof ApiList)) {
                     if ($this.__objects[target].needsSave()){
                         $this.__objects[target].save();
                     }
@@ -586,14 +589,14 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     saveObject = true;
                     values.push(target);
                 }
-                if (!asFormData && $this.__objects[target] && ($this.__objects[target] instanceof ResourceAttribute) && $this.__objects[target].requiresFormData()) {
+                if (!asFormData && $this.__objects[target] && ($this.__objects[target] instanceof resources.Attribute) && $this.__objects[target].requiresFormData()) {
                     asFormData = true;
                 }
                 
                 $this.__committing[target] = $this.__uncommitted[target];
                 delete $this.__uncommitted[target];
             }
-            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(save)', 'committing', values, this.__uncommitted])
+            _log(this.__log, 'debug', ['(IntrospectiveApi)', '(Object)', '(save)', 'committing', values, this.__uncommitted, saveObject])
             
             var completeUpdate = undefined;
             for (var entry in data){
@@ -627,9 +630,12 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     result.registerResult(_result);
                     $this.__updateFromResponse(_result.getResponse(), result);
                     
-                    for (var target in data) {
+                    if (!data) {
+                        for (var target in data) {
                         delete $this.__committing[target];
                     }
+                    }
+                    
                     finishedOne(result);
                     $this.__finishedLoading(result);
                 }
@@ -713,7 +719,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     fail: failedSaving(result, data),                    
                     isApiInternal: true,
                 };
-                if (asFormData) {
+                if (asFormData && FormData) {
                     var formData = new FormData();
                     var attributes = this.getAttributes();
                     $.each(data, function(name, val){
@@ -731,11 +737,21 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     request.contentType = false;
                     request.signPayload = false; 
                 }else{
+                    if (asFormData) {
+                        request.done = function(finnished, result){
+                            alert('in this browser file upload is not supported yet. BETA.')
+                            finnished(result);
+                        }.bind(null, request.done)
+                    }
+                    //request.accepts = {
+                    //    json: "application/json"
+                    //}
+                    request.dataType = 'json';
                     request.data = data;
                 }
                 
                 $this.__setURL(request);
-                var requestSettings = {log: this.__log};
+                var requestSettings = $.extend({log: this.__log}, typeof(settings.request_settings) == 'function' ? settings.request_settings(request) : settings.request_settings);
                 sync_obj = apiClient.add_urgent(request, requestSettings)
                 result.registerRequest(sync_obj, request, requestSettings);
                 
@@ -753,6 +769,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             }else{
                 //saveRelated();
                 //throw Error('nothing to save');
+                finishedSaving(new ApiResult(), null);
             }
             
             return this;
@@ -803,6 +820,9 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             }
             if (typeof data == 'object' && typeof(data.__getID) == 'function') {
                 return data.__getID()
+            }
+            if (data == true) {
+                return 'TODO:NEW'
             }
             for (var index in this.__info.id_attrs){
                 var attr_name = this.__info.id_attrs[index];
@@ -870,11 +890,11 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             if (old === undefined || old.__isBlank()) {
                  if (as_attr || ($this.__getAttributes(false)[target] || $this.__content[target] != undefined) && (!settings.data || $.isEmptyObject(settings.data))) {
                     _settings.data = this.__getAttributes(false)[target];
-                    var attribute = new ResourceAttribute(_settings);
+                    var attribute = new resources.Attribute(_settings);
                     attribute.__updateContent(this.__content['json'][target]);
                     obj = attribute;
                     accessType = "attribute";
-                }else if ($this.__links[_settings.target] != undefined || $this.__links[target] != undefined || _settings.target == 'relationship' ){
+                }else if ($this.__links[_settings.target] != undefined || $this.__links[target] != undefined || _settings.target == 'relationship' || _settings.target == 'walk' ){
                     // TODO: only if were on object endpoint!! LINK_HEADER_TARGETS.indexOf(settings.target) != -1){
 
                     var resource;
@@ -890,6 +910,14 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                             relationship = _settings.data.relationship
                         }
                         $this.__setObj(relationship, resource);
+                    }else if(settings.target == 'walk'){
+                        if (_settings.url) {
+                            _settings.url += target + '/';
+                        }else{
+                            _settings.uri += target + '/';
+                        }
+                        
+                        resource = new ApiObject(_settings);
                     }else{
                         // we don't know yet whether it is a resource or resourceListr
                         resource = new ApiObject(_settings);
@@ -1374,7 +1402,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                 if (typeof format == 'string') {
                     format = {format: format};
                 }
-                request.dataType = format.format;
+                request.dataType = format.format || 'json';
                 delete format.format
                 for  (var arg in format) {
                     // doto: ass query args
@@ -1564,6 +1592,22 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             }
             throw Error('TODO: implement resource.getAttributes')
         },
+        
+        __update_inspection: function(response){
+            if (response['name']) {
+                this.__info.name = response['name'];
+            }
+            if (response['attributes']) {
+                this.__info.attributes = response['attributes'];
+            }
+            if (response['pk_names']) {
+                this.__info.id_attrs = response['pk_names'];
+            }
+            
+            if (response['actions'] && (response['actions']['POST'] || response['actions']['PUT'])) {
+                this.__info.attributes = response['actions']['POST'] || response['actions']['PUT'];
+            }
+        },
 
         __update_info: function(result, is_discovery){
             var jqXHR = result.getXhr(),
@@ -1583,7 +1627,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                 additionalLinks['.'] = jqXHR.url;
             }
 
-            _log(result.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', 'link header', this, result, jqXHR.getResponseHeader('Link'), jqXHR.getResponseHeader('Link-Template')])
+            //_log(result.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiObject)', '(updateFromResponse)', 'link header', this, result, jqXHR.getResponseHeader('Link'), jqXHR.getResponseHeader('Link-Template')])
             $.extend(additionalLinks, parseLinkHeader(jqXHR.getResponseHeader('Link')));
             $.extend(additionalLinks, parseLinkTemplateHeader(jqXHR.getResponseHeader('Link-Template')));
             this.__updateURLLinks(additionalLinks);
@@ -1599,16 +1643,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                 this.__info.is_list = (ranges ? ranges.indexOf('x-records') != -1 && this.isCreated() : false) || (viewType && viewType == 'List');
                 this.__info.is_resource = !this.__info.is_list;
             }
-            if (response['attributes']) {
-                this.__info.attributes = response['attributes'];
-            }
-            if (response['pk_names']) {
-                this.__info.id_attrs = response['pk_names'];
-            }
-            
-            if (response['actions'] && (response['actions']['POST'] || response['actions']['PUT'])) {
-                this.__info.attributes = response['actions']['POST'] || response['actions']['PUT'];
-            }
+            this.__update_inspection(response)
 
             if (this.constructor === ApiObject) {
                 var clone_config = {
@@ -1726,7 +1761,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             return $this;
         },
         
-        __update: function(target, value, uncommitted, replace){
+        __update: function(target, value, uncommitted, replace, eventSettings){
             
             if (this.__content['json'].constructor === Array) {
                 return this.__updateArray.apply(this, arguments);
@@ -1735,7 +1770,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             }
         },
         
-        __updateArray: function(value, uncommitted, replace){
+        __updateArray: function(value, uncommitted, replace, eventSettings){
             var $this = this;
             if (!this.__info.is_resource) {
                 throw Error('handle relationships in ApiList')
@@ -1751,7 +1786,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             }
             // TODO: this.__trigger('updated', [value]) or smth
         },
-        __updateObject: function(target, value, uncommitted, replace){
+        __updateObject: function(target, value, uncommitted, replace, eventSettings){
             var $this = this,
                 str_value = JSON.stringify(value),
                 str_content = JSON.stringify($this.__content['json'][target]),
@@ -1759,7 +1794,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             uncommitted = uncommitted === undefined ? true : uncommitted;
             replace = replace === undefined ? true : replace;
             targetObj = this.__objects[target];
-            if (targetObj instanceof ResourceAttribute) {
+            if (targetObj instanceof resources.Attribute) {
                 targetObj.__update(value);
             }
             if (str_value === str_content === str_orig) {
@@ -1800,7 +1835,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     delete $this.__content['json'][target];
                 }
                 
-                this.__trigger('changed', [target, value])
+                this.__trigger('changed', [target, value], eventSettings)
             }
             
             
@@ -1840,7 +1875,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             return this.__content;
         },
         
-        __connect: function(_domElement, callback){ // TODO: if domElement is instance of jQuery: get real element
+        __connect: function(_domElement, callback, resultCallback){ // TODO: if domElement is instance of jQuery: get real element
             var domElement = _domElement instanceof $ ? _domElement : $(_domElement);
             this.__domElements.push(domElement);
             var inputTargets = new Array();
@@ -1888,8 +1923,21 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     event.preventDefault();
                     event.stopImmediatePropagation();
                     try{
-                        $this.__save();
+                        if ($this.__executionStart(domElement)) {
+                            submitButton.attr('disabled', 'disabled');
+                            $this.__save({
+                                callback: function(result){
+                                    submitButton.removeAttr('disabled');
+                                    $this.__executionDoneHandler.bind($this, domElement).apply(null, arguments);
+                                    if (resultCallback) {
+                                        resultCallback.apply(null, arguments);
+                                    } 
+                                },
+                                request_settings: domElement.data('request_settings')
+                            });
+                        }
                     }catch (e){
+                        submitButton.removeAttr('disabled')
                         _log(this.__log, 'error', ['failed saving', e]);
                         console.error(e.stack)
                     }
@@ -1928,11 +1976,181 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             return false;
         },
         
-        __asForm: function(target){
-            if (target) {
-                return this.__get(target).__asForm()
+        __executionDoneHandler: function(elem, result){
+            if (elem && typeof(elem.formElement) == 'object') {
+                elem = elem.content;
             }
-            return null
+            if (!result.wasSuccessful) {
+                var response = result.getResponse();
+                if (response.msg) {
+                    elem.attr('data-notification', response.msg);
+                }else{
+                    elem.attr('data-notification', 'error');
+                }
+            }
+        },
+        
+        __executionStart: function(elem){
+            var formElement;
+            if (elem && typeof(elem.formElement) == 'object') {
+                formElement = elem;
+                elem = elem.content;
+            };
+            var validate = elem.data('validate');
+            if (validate && typeof(validate) == 'function' && !validate(true)) {
+                return false
+            }
+            elem.removeAttr('data-notification');
+            elem.find('[data-notification]').each(function(){
+                $(elem).removeAttr('data-notification')
+            })
+            return true
+        },
+        
+        __asForm: function(target_or_settings, target_settings){
+            if (typeof target_or_settings == 'string') {
+                return this.__get(target_or_settings).__asForm(target_settings)
+            }
+            var settings = target_or_settings || {},
+                val_tag = (settings.tags || {}).value || (settings.asTable ? 'td' : 'span'),
+                label_tag = (settings.tags || {}).label || (settings.asTable ? 'td' : 'span'),
+                row_tag = (settings.tags || {}).row || (settings.asTable ? 'tr' : 'div'),
+                group_tag = (settings.tags || {}).group || (settings.asTable ? 'rowgroup' : 'p'),
+                form = settings.form,
+                $content = $(settings.asTable ? '<table></table>' : (settings.asRow ? '<tr></tr>' : form ? '<div></div>' : '<form></form>')),
+                max_position = 0,
+                elementSettings = settings.elementConfig || {},
+                showStatusFor = settings.showStatusFor === undefined ? false : settings.showStatusFor,
+                elems = {};
+            
+            if ($content.is('form')) {
+                form = $content
+            }
+            if (form) {
+                form.attr('novalidate', 'novalidate');
+            }
+            var validators = [],
+                attrs = this.getAttributes(),
+                attrs_quantity = attrs.hasOwnProperty('length') ? attrs.length : Object.keys(attrs).length;
+                last_attrs = {},
+                unpositioned_attrs = [],
+                positioned_attrs = {},
+                form_attrs = []
+                position = 0,
+                focused_first = false;
+
+            $.each(attrs, function(key, attr){
+                var position = parseInt(attr.getConfig('position')),
+                    config = {attr: attr, key: key};
+                if (position < 0) {
+                    last_attrs[position] = config;
+                }else if (!isNaN(position)) {
+                    if (position === 0) {
+                        focused_first = true;
+                    }
+                    positioned_attrs[position] = config;
+                }else {
+                    unpositioned_attrs.push(config);
+                }
+            }.bind(this));
+            var last = Object.keys(last_attrs).sort(function(a,b){return a>b}),
+                positioned = Object.keys(positioned_attrs).sort(function(a,b){return a>b}),
+                last_correction = 0;
+            for (var i = 0; i<attrs_quantity; i++) {
+                var value;
+                if (last.length && (attrs_quantity + parseInt(last[0])) <= i) {
+                    value = last_attrs[last[0]];
+                    last.shift();
+                    last_correction++;
+                }
+                else if (positioned.length && parseInt(positioned[0]) <= i + last_correction) {
+                    value = positioned_attrs[positioned[0]];
+                    positioned.shift();
+                }
+                else if (unpositioned_attrs.length) {
+                    value = unpositioned_attrs.shift();
+                }
+                else if (positioned.length) {
+                    value = positioned_attrs[positioned[0]];
+                    positioned.shift();
+                    last_correction--;
+                }else{
+                    console.log(positioned, last)
+                    throw Error('attrs_quantity was not correct.')
+                }
+                form_attrs.push(value);
+            }
+            
+            if (focused_first) {
+                position = -1;
+            }else{
+                position = 0;
+            }
+            $.each(form_attrs, function(index, config){
+                if (!config) {
+                    return
+                }
+                var key = config.key,
+                    attr = config.attr,
+                    elem = attr.__asForm($.extend(elementSettings, {
+                        position: config.position !== undefined ? (focused_first ? config.position - 1 : config.position) : position++,
+                        field_wrapper: val_tag,
+                        label_wrapper: label_tag,
+                        group_wrapper: group_tag,
+                        wrapper: settings.asRow ? undefined : row_tag,
+                        connect: true,
+                        autosubmit: settings.partial,
+                        classPrefix: settings.classPrefix,
+                        callback: settings.callback,
+                        request_settings: settings.request_settings,
+                        showStatusFor: showStatusFor,
+                        contentConfigAttrs: settings.contentConfigAttrs,
+                        fieldConfigAttrs: settings.fieldConfigAttrs,
+                        fieldBeforeLabel: settings.fieldBeforeLabel,
+                        skipValidation: settings.skipValidation
+                    })),
+                    $elem = elem.content;
+                if (elem.position && elem.position > max_position) {
+                    max_position = elem.position;
+                }
+                $content.append(settings.patchElement ? settings.patchElement(key, $elem) : $elem);
+                elems[key] = elem;
+                validators.push(elem.validate)
+            })
+
+            var validate = function(form, content, validators, showStatus){
+                var valid, showValidationClass = (settings.classPrefix || '') + 'validation-show';
+                $.each(validators, function(index, validator){
+                    valid = validator() && valid;
+                });
+                if (showStatus && showStatusFor !== null && (valid === false || showStatusFor)) {
+                    (form || content).addClass(showValidationClass)
+                }else{
+                    content.find('.' + showValidationClass).removeClass(showValidationClass);
+                    (form || content).removeClass(showValidationClass)
+                }
+                return valid !== false;
+            }.bind(null, form, $content, validators)
+            if (settings.preValidate) {
+                validate(false)
+            }
+            
+            $content.css('display', 'flex').css('flex-flow', settings.asRow ? 'row' : 'column')
+            if ($content.is('form')) {
+                $content.append('<input type="submit" value="ok"/>');
+                if (settings.use_reset) {
+                    $content.append('<input type="reset" value="reset"/>')
+                }
+            }
+            (form || $content).data('validate', validate)
+            if (settings.request_settings) {
+                (form || $content).data('request_settings', settings.request_settings)
+            }
+            
+            
+            if (settings.connect !== false)this.__connect(form || $content, undefined, settings.callback);
+            // TODO connect stuff.
+            return $content;
         },
         
         __replaceWith: function(resource){
@@ -1975,6 +2193,12 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
         },
         
         getUUID: function(){
+            var id = this.__getID.apply(this, arguments);
+            if (true) {  // TODO test if matches UUID regex
+                return id
+            }else{
+                // TODO: generate namespace based uuid from id
+            }
             return 'TODO_UUID'
         },
         
@@ -2212,7 +2436,7 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             $this.__updateContent(newContent);
             
             var content = $this.__onGet(false);
-            $this.__parent.__update($this.__target_name, content)
+            $this.__parent.__update($this.__target_name, content, undefined, undefined, {target: domElement})
             $this.__updateConnected(content, domElement);
         },
         
@@ -2220,22 +2444,31 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             return ['file upload'].indexOf(this.getConfig('type')) != -1
         },
         
-        __save: function(){
-            this.__parent.__save({asFormData: this.requiresFormData()}) // todo;__save(this), so patch is possible
+        __save: function(callback_or_settings){
+            var settings = typeof(callback_or_settings) == 'function' ? {callback: callback_or_settings} : (callback_or_settings || {});
+            settings.asFormData = this.requiresFormData();
+            this.__parent.__save(settings) // todo;__save(this), so patch is possible
         },
         
-        __get_updatedHandler: function($this, autoSubmit){
+        __get_updatedHandler: function($this, settings){
             return function(event){
                 
                 var domElement = $(event.target);
                 var currentContent = $this.__onGet(false);
-                var newContent = domElement.val();
-                
+                var newContent = typeof(settings.value) == 'function' ? settings.value() : domElement.val();
+                if (typeof(settings.validate) == 'function'){
+                    if (!settings.validate(settings.formElement ? settings : domElement, true)) {
+                        return false
+                    }
+                }
                 if (currentContent != newContent) {
                     $this.__update(newContent, domElement);
                     
-                    if (autoSubmit)
-                        $this.__save();
+                    if (settings.autosubmit){
+                        if ($this.__parent.__executionStart($.extend({content: domElement}, settings))){
+                            $this.__save({callback: settings.resultCallback, request_settings: settings.request_settings});
+                        }
+                    }
                 }           
     
                 return true
@@ -2249,7 +2482,8 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
                     continue
                 }
                 try {
-                    $(element).val(content).trigger('change');
+                    var cont = typeof($(element).data('valuePreprocessor')) == 'function' ? $(element).data('valuePreprocessor')(content) : content;
+                    $(element).val(cont).trigger('change');
                 } catch(e) {
                     this.__domElements[index] = null;
                 }
@@ -2277,34 +2511,45 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             return file
         },
         
-        __connect: function(_domElement, callback, autoSubmit){ // TODO: if domElement is instance of jQuery: get real element
+        __connect: function(_domElement_or_settings, callback, autoSubmit){ // TODO: if domElement is instance of jQuery: get real element
+            var settings = typeof(_domElement_or_settings) == 'object' ? _domElement_or_settings : {},
+                _domElement = typeof(_domElement_or_settings) != 'object' ? _domElement_or_settings : settings.field ? settings.field : settings.content,
+                defaults_to = settings.defaults_to || this.getConfig('defaults_to');
+            settings.callback = callback || settings.callback;
+            settings.autosubmit = autoSubmit || settings.autosubmit;
             var domElement = _domElement instanceof $ ? _domElement : $(_domElement);
-            if (!domElement.attr('id')) {
+            if (domElement.is(':input') && !domElement.attr('id')) {
                 domElement.attr('id', this.asDomId());
             }
             
             this.__domElements.push(domElement);
-            if (this.__config && this.__config.required) {
-                domElement.attr('required', 'required');
+            if (settings.value) {
+                domElement.data('valuePreprocessor', settings.value)
             }
-            if (this.__config && this.__config.read_only) {
-                domElement.attr('disabled', 'disabled');
-                if (!this.__parent.__isCreated()) {
-                    domElement.hide();
-                }
+            if (typeof(settings.validate) == 'function' && !(domElement.is(':checkbox') || domElement.is(':radio'))) {
+                domElement.keyup(settings.validate.bind(null, settings, false))
             }
-            domElement.change(this.__get_updatedHandler(this, autoSubmit, domElement)); // on('change.introspective-api-object.' + this.__parent.__getID(), 
+
+            domElement.change(this.__get_updatedHandler(this, settings, domElement)); // on('change.introspective-api-object.' + this.__parent.__getID(), 
             
+            if (typeof(defaults_to) == 'string') {
+                this.__parent.bind('changed', function(domElement, event, target, value){
+                    if (target == defaults_to && domElement.size() && !domElement.val()) {
+                        value = typeof($(event.target).data('valuePreprocessor')) == 'function' ? $(event.target).data('valuePreprocessor')(undefined, domElement) : value;
+                        domElement.val(value).trigger('change');
+                    }
+                }.bind(this, domElement))
+            }
             if (this.__parent.__isCreated()) {
                 this.__load(function(result){
                     domElement.val(this.__onGet(false)).change();
-                    if (callback instanceof Function) {
-                        callback(result);
+                    if (settings.callback instanceof Function) {
+                        settings.callback(result);
                     }   
                 }.bind(this))
             }else{
-                if (callback instanceof Function) {
-                    callback(result);
+                if (settings.callback instanceof Function) {
+                    settings.callback(result);
                 }
             }
 
@@ -2319,56 +2564,397 @@ define(['jquery', 'introspective-api-log', 'introspective-api-utils', 'json'], f
             $(domElement).val(null).off('.introspective-api-object.' + this.__parent.__getID());
             
         },
-        
-        __asForm: function(connect, placeholder, autosubmit){
+
+        __formElement: function(settings, raw){
             var ret,
-                type = this.getConfig('type') || 'string';
-            if (['string', 'integer'].indexOf(type) != -1 || typeof(type) == 'object'){
-                if (this.getConfig('choices') && typeof(this.getConfig('choices')[0]) == 'object') {
+                asGroup,
+                type = settings.type || this.getConfig('type') || 'string',
+                validators = this.getConfig('validation'),
+                
+                // internal use only of .choices as settings:
+                choices = settings.choices === undefined ? this.getConfig('choices') : settings.choices,
+                validate;
+            if (typeof validators != 'object') {
+                if (validators) {
+                    validators = [validators]
+                }else{
+                    validators = []
+                }
+            }
+            if ('radio' == type){
+                if (choices && typeof(choices[0]) == 'object') {
+                    ret = $('<span></span>');
+                    $.each(choices, function(index, choice){
+                        var id = (settings.id || this.asDomId()) + '.' + choice[0];
+                        ret.append(this.__formElement($.extend({}, settings, {
+                            choices: null,
+                            type: 'radio',
+                            choice:choice
+                        })).element);
+                    }.bind(this))
+                }else if (settings.choice){
+                    var id = (settings.id || this.asDomId()) + '.' + settings.choice[0],
+                        name = settings.name || this.__target_name;
+                    
+                    ret = this.__buildFormElement('<input name="'+name+'" type="radio" value="' + settings.choice[0] + '"/>' , $.extend({}, settings, {
+                        id: id,
+                        asComplex: true,
+                        label: settings.choice[1]
+                    }))
+                    if (!raw) {
+                        ret = ret.content;
+                    }
+                }else{
+                    ret = $('<span>?</span>');  // TODO
+                }
+            }else if (['string', 'integer', 'decimal', 'field'].indexOf(type) !== -1 || typeof(type) == 'object'){
+                if (choices && typeof(choices[0]) == 'object') {
                     ret = $('<select></select>');
-                    $.each(this.getConfig('choices'), function(index, choice){
-                        ret.append('<option value="' + choice[0] + '">' + choice[1] + '</a>')
+                    ret.append('<option>---</option>')
+                    $.each(choices, function(index, choice){
+                        ret.append('<option value="' + choice[0] + '">' + choice[1] + '</option>')
                     })
                 }else{
                     ret = $('<input type="text" />');
                 }
-                
-            }
-            if (type == 'password'){
+            }else if (type == 'password'){
                 ret = $('<input type="password" />');
-            }
-            if (type == 'file upload'){
+                var confirm_validator_index = validators.indexOf('confirm');
+                if (confirm_validator_index !== -1){
+                    asGroup = this.__buildFormElement(ret.clone(), $.extend({}, settings, {
+                        label: null,
+                        placeholder: 'confirm',
+                        asComplex: true,
+                        validators: [function(originalElement, confirmationElement){
+                            var field = originalElement.field,
+                                confirmation_field = confirmationElement.field;
+                            
+                            if (field.val() == confirmation_field.val()) {
+                                confirmationElement.setValidationState(1);
+                                return true
+                            }
+                            confirmationElement.setValidationState(false, 'TODO: message?');
+                            return false
+                        }]
+                    }));
+                    validate = [asGroup];
+                    asGroup.field.change(ret.trigger.bind(ret, 'change'))
+                    asGroup.field.keyup(ret.trigger.bind(ret, 'keyup'))
+                    //delete validators[confirm_validator_index];
+                }
+                //validators.push(function(formElement){
+                //    var field = formElement.field;
+                //    if (field.val().length < 6) {
+                //        formElement.setValidationState(false);
+                //        return false
+                //    }
+                //    formElement.setValidationState(1);
+                //    return true
+                //})
+            }else if (type == 'file upload'){
                 ret = $('<input type="file" />');
-            }
-            if (type == 'date'){
-                ret = $('<input type="string" />');
+            }else if (type == 'date'){
+                ret = $('<input type="text" placeholder="yyyy-mm-dd"/>');
+                // TODO: get format from config
                 try {
-                    ret.datepicker({dateFormat: 'yy-mm-dd'})
+                    //ret.datepicker({dateFormat: 'yyyy-mm-dd'})
                 } catch(e) {
                     
                 }
-            }
-            if (!ret){
+            }else if (['color', 'data', 'datetime', 'datetime-local', 'email', 'image', 'month', 'number', 'radio', 'range', 'search', 'tel', 'text', 'time', 'url', 'week'].indexOf(type) != -1){
+                ret = $('<input type="'+type+'" />');
+            }else if (['checkbox'].indexOf(type) !== -1){
+                ret = $('<input type="'+type+'"/>');
+                if (this.getConfig('value') !== undefined) {
+                    ret.attr('value', this.getConfig('value'))
+                }
+            }else{
                 ret = $('<input type="hidden" />');
             }
-            ret.attr('name', this.__target_name);
-            if (placeholder) {
-                ret.attr('placeholder', this.getLabel())
+            return {element: ret, validators: validators, validate: validate, asGroup: asGroup}
+        },
+        
+        __asForm: function(connect, placeholder, autosubmit){
+            var settings = {raw: true};
+            if (typeof connect == 'object') {
+                settings = $.extend({}, connect);
+                if (! placeholder === autosubmit === undefined) {
+                    throw Error('asForm(settings) or asForm(*, **, **)')
+                }
+                placeholder = settings.placeholder;
+                connect = settings.connect;
+                autosubmit = settings.autosubmit;
+            }else{
+                settings.connect = connect;
+                settings.placeholder = placeholder;
+                settings.autosubmit = autosubmit;
             }
             
-            if (connect !== false)this.__connect(ret, function(){}, autosubmit === undefined ? true : autosubmit);
-            return ret[0]
+            settings.position = parseInt(settings.position !== undefined ? settings.position : this.getConfig('position'));
+
+            var formElement = this.__formElement(settings),
+                ret = formElement.element,
+                field = ret,
+                validators = formElement.validators;
+            settings.asGroup = formElement.asGroup;
+            settings.id = settings.id || this.asDomId();
+
+            
+            field.attr('name', this.__target_name);
+            formElement = this.__buildFormElement(formElement, settings)
+            
+            if ( !isNaN(formElement.position)) {
+                var style_order = 'order:'+formElement.position+';';
+                if (formElement.position == -1) {
+                    field.attr('autofocus', 'autofocus')
+                }
+
+                var style = formElement.content.attr('style');
+                if (!style) {
+                    formElement.content.attr('style', style_order)
+                }else{
+                    formElement.content.attr('style', style_order + style)
+                }
+            }else{
+                //field.attr('tabindex', 0);
+            }
+
+            if (settings.connect !== false)this.__connect(formElement);
+
+            return settings.raw ? formElement.content[0] : formElement
+        },
+        
+        __setFieldAttr: function(formElement, settings, attr, value, isNative){
+            isNative = isNative === undefined ? ['placeholder', 'required', 'disabled'].indexOf(name) !== -1 : isNative;
+            formElement.field.attr((!isNative ? 'data-' : '') + attr, isNative ? attr : value)
+        },
+        
+        __setContentAttr: function(formElement, settings, attr, value){
+            formElement.content.attr('data-' + attr, value)
+        },
+        
+        __buildFormElement: function(formElement, settings){
+            if (!settings) {
+                settings = {};
+            }
+            var isComplex = formElement.element !== undefined,
+                asComplex = isComplex || settings.asComplex === true,
+                ret = isComplex ? formElement.element : formElement instanceof $ ? formElement : $(formElement),
+                id = settings.id,
+                field = ret;
+            
+            if (settings.field_wrapper) {
+                ret = $('<' + settings.field_wrapper + '></' + settings.field_wrapper + '>').append(ret)
+                ret.addClass((settings.classPrefix || '') + 'element-field');
+            }
+            if (settings.label !== null && (settings.label_wrapper || settings.label || this.getLabel())) {
+                var label = $('<label for="'+id+'">'+(settings.label || this.getLabel())+'</label>');
+                if (settings.label_wrapper) {
+                    label = $('<' + settings.label_wrapper + '></' + settings.label_wrapper + '>').append(label)
+                    label.addClass((settings.classPrefix || '') + 'element-label');
+                }
+                if (settings.fieldBeforeLabel){
+                    ret = ret.add(label)
+                }else{
+                    ret = label.add(ret)
+                }
+            }
+            if (settings.wrapper) {
+                ret = $('<' + settings.wrapper + '></' + settings.wrapper + '>').append(ret)
+                ret.addClass((settings.classPrefix || '') + 'element');
+            }
+            
+            
+            if (settings.asGroup && settings.group_wrapper) {
+                var order_style = ret.css('order');
+                ret = $('<' + settings.group_wrapper + '></' + settings.group_wrapper + '>').append(ret)
+                ret.addClass((settings.classPrefix || '') + 'group');
+                if (!isNaN(parseInt(order_style))){
+                    ret.attr('style', 'order:'+order_style+';');
+                }
+                ret.append(settings.asGroup.content !== undefined ? typeof(settings.asGroup.content) == 'function' ? settings.asGroup.content() : settings.asGroup.content : settings.asGroup)
+            }
+            
+            if (field.size() == 1 && field.is(':input')) {
+                if (settings.placeholder) {
+                    field.attr('placeholder', settings.placeholder !== true ? settings.placeholder : this.getLabel())
+                }
+                
+                if ( !isNaN(parseInt(settings.position))) {
+                    field.attr('tabindex', settings.position >= 0 ? settings.position + 2 : 1);
+                }
+                if (id) {
+                    field.attr('id', id);
+                }
+                if (this.getConfig('required')) {
+                    field.attr('required', 'required');
+                }
+                if (this.getConfig('read_only')) {
+                    field.attr('disabled', 'disabled');
+                    if (!this.__parent.__isCreated() && !this.getContent('json')) {
+                        ret.hide();
+                    }
+                }
+            }
+            if ((field.attr('type') == 'hidden' && !settings.asGroup)) {
+                ret.hide();
+            }
+            
+            
+            
+            if (!asComplex) {
+                return ret
+            }
+            
+            var element = {};
+            $.extend(element, {
+                formElement: isComplex ? formElement : {},
+                id: id,
+                content: ret,
+                field: field,
+                value: settings.value || formElement.value,
+                position: settings.position,
+                resultCallback: function(element, result){
+                            this.__parent.__executionDoneHandler.apply(null, arguments);
+                            if (settings.callback)settings.callback.call(null, result);
+                }.bind(this, element),
+                request_settings: settings.request_settings,
+                validators: settings.validators ? settings.validators : settings.validator ? [settings.validator] : undefined,
+                validate: function(elem, domElement, triggerChange){
+                    var elements = new Array(),
+                        valid;
+                    triggerChange = triggerChange === undefined ? true : triggerChange;
+                    if (typeof(elem.formElement.validate) == 'function') {
+                        elem.formElement.validate(elem)
+                    }else if (typeof(elem.formElement.validate) == 'object' && elem.formElement.validate.length) {
+                        $.extend(elements, elem.formElement.validate);
+                    }
+                    elements.unshift(elem);
+                    $.each(elements, function(index, element){
+                        element.setValidationState(null);
+                        if ([false, undefined].indexOf(element.field.attr('required')) === -1 && (!element.field.val() || (element.field.is(':checkbox') && !element.field.is(':checked')))) {
+                            element.setValidationState(false)
+                        }
+                        if (element.formElement.validators) {
+                            $.each(element.formElement.validators , function(index, validator){
+                                if (!validator || typeof(validator) == 'string') {
+                                    return
+                                }
+                                if (typeof(validator) == 'function') {
+                                    validator(elem, element, triggerChange)
+                                }else if (typeof(validator.validate) == 'function'){
+                                    validator.validate(elem, element, triggerChange)
+                                };
+                            })
+                        }
+                        if (element.validators) {
+                            $.each(element.validators , function(index, validator){
+                                if (!validator || typeof(validator) == 'string') {
+                                    return
+                                }
+                                if (typeof(validator) == 'function') {
+                                    validator(elem, element, triggerChange)
+                                }else if (typeof(validator.validate) == 'function'){
+                                    validator.validate(elem, element, triggerChange)
+                                };
+                            })
+                        }
+                    })
+                    $.each(elements, function(index, element){
+                        valid = element.setValidationState() && valid;
+                    })
+                    return valid !== false
+                }.bind(null, element),
+                getValidationState: function(element){
+                    var validClass = (settings.classPrefix || '') + 'validation-valid',
+                        invalidClass = (settings.classPrefix || '') + 'validation-invalid',
+                        showValidationClass = (settings.classPrefix || '') + 'validation-show';
+                    return element.field.hasClass(invalidClass) ? false : element.field.hasClass(validClass) ? true : undefined
+                }.bind(null, element),
+                setValidationState: function(settings, element, state, validator){
+                    var validClass = (settings.classPrefix || '') + 'validation-valid',
+                        invalidClass = (settings.classPrefix || '') + 'validation-invalid',
+                        showValidationClass = (settings.classPrefix || '') + 'validation-show';
+                    // TODO: complex handler, that respects settings.validationConfig
+                    // e.g. allow "min 3 validations succeeded" or "'length' and 3 other validators"
+
+                    if (state === false) {
+                        if (!element.field.hasClass(validClass)) {
+                            element.field.addClass(invalidClass)
+                            // TODO: set messages
+                        }
+                    }else if (state === true){
+                        element.field.addClass(validClass);
+                        if (element.field.hasClass(invalidClass)) {
+                            element.field.removeClass(invalidClass);
+                            // TODO: remove messages
+                        }
+                    }else if (state === undefined){
+                        if(!element.field.hasClass(invalidClass)){
+                            element.field.addClass(validClass);
+                            state = true;
+                            if (settings.validationEnabled){
+                                element.field.removeAttr('disabled')
+                            }
+                        }else{
+                            state = false;
+                            if (settings.validationEnabled){
+                                element.field.attr('disabled', 'disabled')
+                            }
+                        }
+                            
+                        if (settings.showStatusFor !== null && (state === false || settings.showStatusFor)) {
+                            element.field.addClass(showValidationClass)
+                        }else{
+                            element.field.removeClass(showValidationClass)
+                        }
+                    }else if (state === null){
+                        element.field.removeClass(validClass).removeClass(invalidClass);
+                        // TODO: remove messages
+                    }else if (typeof(state) == 'integer') {
+                        state = undefined  // TODO: sum(state_integers)
+                    }
+                    if (typeof(settings.setValidationState) == 'function') {
+                        settings.setValidationState(element, state, validator)
+                    }
+                    return state
+                }.bind(null, settings, element),
+            })
+            
+            element.field.data('validate', element.validate);
+            if (settings.fieldConfigAttrs) {
+                $.each(settings.fieldConfigAttrs, function(name, value){
+                    value = this.getConfig(name) !== undefined ? this.getConfig(name) : value;
+                    if (value) {
+                        this.__setFieldAttr(element, settings, name, value);
+                    }
+                }.bind(this))
+            }
+            if (settings.contentConfigAttrs) {
+                $.each(settings.contentConfigAttrs, function(name, value){
+                    value = this.getConfig(name) !== undefined ? this.getConfig(name) : value;
+                    if (value) {
+                        this.__setContentAttr(element, settings, name, value);
+                    }
+                }.bind(this))
+            }
+            
+            return element
         },
         
         asDomId: function(){
             var id = '';
-            if (this.__parent && this.__parent.getID()) {
-                id += String(this.__parent.getUUID())
+            if (this.__parent && this.__parent.getUUID(true)) {
+                id += String(this.__parent.getUUID(true))
             }else{
-                id += 'TODO_NEW'
+                id += 'TODO'
             }
             id += '.' + this.__target_name;
             return id
+        },
+        
+        validate: function($input){
+            
         }
         
     });
