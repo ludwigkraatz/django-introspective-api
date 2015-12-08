@@ -270,7 +270,7 @@ class ApiEndpointMixin(object):
 
                 urlpatterns.append(
                     url(
-                        endpoint_url,
+                        endpoint_url + endpoint.as_sitemap_url(absolute=False, python_formatting=True, resolve=False),
                         RedirectView.as_view(
                             url=redirect_url,
                             permanent=endpoint.permanent_redirect,
@@ -278,7 +278,8 @@ class ApiEndpointMixin(object):
 
                             origin_view = origin_view,
                             redirect_lookup = redirect_lookup
-                        ))
+                        ),
+                        name = endpoint.view_name)
                 )
             else:
                 endpoint_patterns = endpoint.url_patterns
@@ -635,7 +636,7 @@ class ApiEndpoint(ApiEndpointMixin):
         return self.get_filters_object_name()
 
 
-    def as_sitemap_url(self, absolute=False, python_formatting=False, with_name=None):
+    def as_sitemap_url(self, absolute=False, python_formatting=False, with_name=None, resolve=True):
         """
         @returns the sitemap url string
         @brief the sitemap urls might contain {vars} when in the sitemap.json or (vars)%s for django urls (python formatting)
@@ -651,9 +652,11 @@ class ApiEndpoint(ApiEndpointMixin):
         elif self.type is None:
             url = '%s' % (with_name or self.name)
         elif self.type is self.REDIRECT_ENDPOINT:
-            #absolute=False
-            #url = self.target_endpoint.as_sitemap_url(absolute=True)
-            url = '%s' % (with_name or self.name)
+            if resolve:
+                absolute = False
+                url = self.target_endpoint.as_sitemap_url(absolute=True, python_formatting=python_formatting, with_name=with_name or self.name)
+            else:
+                url = '%s' % (with_name or self.name)
         else:
             raise NotImplementedError()
 
