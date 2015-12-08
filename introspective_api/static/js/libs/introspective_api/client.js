@@ -126,6 +126,24 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             this.locked_restricted = false;
             return
         },
+        
+        syncTimestamp: function(request, settings, response){
+            if (settings.host && settings.host.setTimestampOffset) {
+                if (response.ts || response.timestamp) {
+                    var ts;
+                    if (settings && settings.ts) {
+                        ts = settings.ts
+                    }else{
+                        ts = this.getTimestamp();
+                    }
+                    settings.host.setTimestampOffset((response.ts || response.timestamp) - ts)
+                }else{
+                    throw Error('cannot sync timestamp because couldnt find it in response', settings)
+                }
+            }else{
+                throw Error('cannot sync timestamp for undefined host', settings)
+            }
+        },
 
         _registeredHandlers: {
             201:{
@@ -136,21 +154,12 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     }
                 },
             },
-            503:{
-                'INCOMPLETE': {
+            400:{
+                'HAWK TIMESTAMP OUT OF SYNC': {
                     'obj': null,
                     'callback': function(context){
-                        retryAfter = jqXHR.getResponseHeader('Retry-After');
-                        return context.methodMap.repeatRequest(retryAfter);
-                    }
-                },
-            },
-            503:{
-                'INCOMPLETE': {
-                    'obj': null,
-                    'callback': function(context){
-                        retryAfter = jqXHR.getResponseHeader('Retry-After');
-                        return context.methodMap.repeatRequest(retryAfter);
+                        context.apiClient.syncTimestamp(context.request, context.settings, context.response)
+                        return context.methodMap.repeatRequest();
                     }
                 },
             },
@@ -250,6 +259,14 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
         
         getProtocol: function(settings){
             return 'http://' // 'https://'
+        },
+        
+        getTimestamp: function(host){
+            var ts = Math.round(+new Date()/1000);
+            if (host && host.fixTimestamp) {
+                return host.fixTimestamp(ts);
+            }
+            return ts;
         },
         
         ajax_apiInternal: function( ajax, ajax_settings, id){
@@ -1229,8 +1246,16 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 }
                 request.url = url;
                 // TODO: this.updateCSRFToken(result)
-                return this.add_urgent(request, settings);
+                var id = this.add_urgent(request, settings, id);
+                this.registerCallbacksForRequest(id, {
+                    done: function(result){
+                        this.syncTimestamp(result.getRequest(), result.getSettings(), result.getResponse())
+                    }.bind(this)
+                    
+                })
+                return id
             }.bind(this))
+            return id
         },
         
         logout: function(settings){

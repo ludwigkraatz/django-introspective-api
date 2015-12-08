@@ -102,6 +102,14 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
         
         getCache: function(){
             return this.host.getCache.apply(this.host, arguments)
+        },
+        
+        setTimestampOffset: function(){
+            return this.host.setTimestampOffset.apply(this.host, arguments)
+        },
+        
+        fixTimestamp: function(){
+            return this.host.fixTimestamp.apply(this.host, arguments)
         }
     })
     
@@ -128,6 +136,17 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
         authEndpointHost: null,
         
         xhrHandlerMap: {},
+        
+        fixTimestamp: function(ts){
+            if (this._ts_offset) {
+                return ts + this._ts_offset
+            };
+            return ts
+        },
+        
+        setTimestampOffset: function(offset){
+            this._ts_offset = offset;
+        },
 
         ready: function(){
             return true
