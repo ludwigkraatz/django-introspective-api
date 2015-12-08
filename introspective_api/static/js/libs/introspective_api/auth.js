@@ -42,6 +42,7 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
                 'authenticated': {},
                 'logged_out': {}
             });
+            this.hosts = {};
         },
         
         update: function(new_auth){
@@ -112,10 +113,11 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             this.proxied = proxied;
         },
         
-        info: function(){
+        info: function(host){
             if (!this.profile) {
                 return null
             }
+            host = this.resolveHost(host);
             return _auth.profiles[this.profile].info
         },
         
@@ -130,13 +132,11 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             if (this.proxied) {
                 return this.proxied.isAuthenticated(host)
             }
-            if (!host) {
-                host = this.default_host;
-            }
+            var host_name = this.resolveHost(host);
             if (this.profile) {  // TODO: when profile === undefined, host.getAuthStatus()
-                if (this._last_authenticated[host] !== undefined) {
+                if (this._last_authenticated[host_name] !== undefined) {
                     if (this.auto_logout_time && (
-                            this.auto_logout_time + this._last_authenticated[host][1] < (+new Date()/1000)
+                            this.auto_logout_time + this._last_authenticated[host_name].timestamp < (+new Date()/1000)
                         )) {
                         return undefined
                     }
@@ -155,18 +155,18 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             if (this.proxied) {
                 this.proxied.refresh.apply(this.proxied, arguments)
             }else{
-                var host = this.resolveHost(undefined, settings, false),
+                var host_name = this.resolveHost(undefined, settings, false),
                     response = result.getResponse(),
                     profile = response.profile,
                     csrf_token = response.csrf_token;
                 this.provider.addProfile(profile, result.getResponse());
                 // TODO: update info
-                this._last_authenticated[host] = [settings.method, +new Date()/1000];
+                this._last_authenticated[host_name] = {method: settings.method, timestamp: +new Date()/1000, result: result};
                 if (csrf_token) {
-                    this.hosts[host].setCSRFToken(csrf_token);
+                    this.hosts[host_name].setCSRFToken(csrf_token);
                 }
                 this.update(profile);
-                delete this.auth_requests[host];
+                delete this.auth_requests[host_name];
                 
                 
                 // resetting the old object, to have only one location where the access secret is stored
@@ -178,13 +178,25 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             return this
         },
 
+        lastAuthenticated: function(host){
+            if (typeof(host) == 'object' && !host.name) {
+                host = host.host;
+            }
+            if (this.proxied) {
+                return this.proxied.lastAuthenticated.apply(this.proxied, arguments)
+            }else{
+                var host_name = this.resolveHost(host, {});
+                return this._last_authenticated[host_name]
+            }
+        },
+
         getInteractionHandler: function(){
             return this.interactionHandler
         },
 
         resolveHost: function(host, settings, patch_settings){
             if (!host) {
-                if (settings.host) {
+                if (settings && settings.host) {
                     host = settings.host
                 }else{
                     host = this.default_host;
@@ -193,37 +205,48 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             if (settings && patch_settings !== false) {
                 this._patchHostSettings(host, settings)
             }
-            return host.name ? host.name : host
+            var host_name = host.name ? host.name : (host.endpoint ? host.endpoint : host);
+            if (!this.hosts[host_name]) {
+                this.hosts[host_name] = host;
+            }
+            
+            return host_name
         },
 
-        refresh: function(host){
+        refresh: function(host, settings){
             if (this.proxied) {
                 return this.proxied.refresh.apply(this.proxied, arguments)
             }else{
-                var settings = {},
-                    result = {};
-                if (typeof(host) == 'object') {
+                var result = {};
+                if (typeof(host) == 'object' && !settings && !host.name) {
                     settings = host;
                     host = settings.host;
                     delete settings.host;
+                }else if (typeof(host) == 'function') {
+                    settings = {};
+                    settings.callback = host;
+                    host = undefined;
+                }else if(!settings){
+                    settings = {};
                 }
-                host = this.resolveHost(host, settings)
+                var host_name = this.resolveHost(host, settings);
+
                 settings.auth = this;
-                if (this.auth_requests[host]) {
-                    result.request_id = this.auth_requests[host];
+                if (this.auth_requests[host_name]) {
+                    result.request_id = this.auth_requests[host_name];
                 }else{
-                    settings.callback = function(host, superCallback, result){
-                        delete this.auth_requests[host];
+                    settings.callback = function(host_name, superCallback, result){
+                        delete this.auth_requests[host_name];
                         if (superCallback)superCallback(result);
-                    }.bind(this, host, settings.callback);
+                    }.bind(this, host_name, settings.callback);
                     
                     if (this.isAuthenticated(host) !== false) {
                         // get accessStuff
-                        result.request_id = this.hosts[host].refreshCredentials(settings)
+                        result.request_id = this.hosts[host_name].refreshCredentials(settings)
                     }else{
-                        result.request_id = this.hosts[host].refreshCredentials(settings)
+                        result.request_id = this.hosts[host_name].refreshCredentials(settings)
                     }
-                    this.auth_requests[host] = result.request_id;
+                    this.auth_requests[host_name] = result.request_id;
                 }
 
                     
@@ -243,14 +266,14 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             if (this.proxied) {
                 this.proxied.logout.apply(this.proxied, arguments)
             }else{
-                if (typeof(host) == 'object' && settings === undefined) {
+                if (typeof(host) == 'object' && settings === undefined && !host.name) {
                     settings = host;
                     host = settings.host;
                 }
             
                 settings.auth = this;
-                host = this.resolveHost(host, settings);
-                this.hosts[host].logout(settings, function(result){
+                var host_name = this.resolveHost(host, settings);
+                this.hosts[host_name].logout(settings, function(result){
                     // TODO: delete accessKeys a.s.o.
                     if (callback)callback(result);
                     this.__trigger('logged_out')
@@ -263,15 +286,15 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             if (this.proxied) {
                 this.proxied.login.apply(this.proxied, arguments)
             }else{
-                if (typeof(host) == 'object' && settings === undefined) {
+                if (typeof(host) == 'object' && settings === undefined && !host.name) {
                     settings = host;
                     host = settings.host;
                 }
             
                 settings.auth = this;
-                host = this.resolveHost(host, settings);
+                var host_name = this.resolveHost(host, settings);
                 // TODO: patch host to settings.data.username
-                this.hosts[host].login(settings, function(result){
+                this.hosts[host_name].login(settings, function(result){
                     // TODO: take settings.data.username for info
                     // TODO: delete settings.data.* as this is sensitive data
                     //delete result.getRequest().data;
@@ -337,13 +360,6 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             
         },
         
-        getCorrectTimestamp: function(){
-            if (this.backendTimestamp) {
-                return Math.round(+new Date()/1000) - this.clientTimestamp + this.backendTimestamp;
-            }
-            return Math.round(+new Date()/1000);
-        },
-        
         getAccessInfo: function(action){
             if (action.settings.auth.accessId) {
                 if (action.settings.auth.accessSecret && action.settings.auth.accessAlgorithm) {
@@ -377,7 +393,7 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
             var data;
             //delete settings.data;
             _log(settings.log || this.__log, 'debug', ['(IntrospectiveApi)', '(ApiAuth)', '(resquest)', 'signing', request, 'with', settings])
-            if (settings.signPayload !== false) {
+            if (settings.signPayload !== false && request.data && Object.keys(request.data).length) {
                 var payload = {};
                 data = {};
                 
@@ -399,7 +415,9 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
                 }else{
                     data = null;
                 }
-                request.data = data;
+                request.data = JSON2.stringify(data);
+                request.contentType = 'application/json; charset=utf-8';
+                delete request.dataType;
             }else{
                 data = null;
             }
@@ -412,8 +430,8 @@ define(['jquery', 'json', "introspective-api-log", 'introspective-api-utils', 'h
                     algorithm: auth.accessAlgorithm
                 },
                 //ext: 'some-app-data',
-                contentType: request.dataType,
-                timestamp: this.getCorrectTimestamp(),
+                contentType: request.dataType || request.contentType,
+                timestamp: settings.ts,
             };
             if (data) {                    
                 options.payload= JSON2.stringify(payload);

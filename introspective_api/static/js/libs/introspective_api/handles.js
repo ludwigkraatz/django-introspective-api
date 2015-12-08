@@ -45,8 +45,11 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
                     state_lookup['me'] = true;
                 }
                 if (state.filter == 'my') {
-                    state_lookup['private'] = true;
+                    state_lookup['my'] = true;
                 }
+                //if (state.filter == 'private') {
+                //    state_lookup['private'] = true;
+                //}
             }
             return state_lookup;
         },
@@ -88,6 +91,10 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             }
             if (!request.source) {
                 request.source = this.config.source;
+            }
+
+            if (typeof(this.getInit().initialValue || this.config.initialValue) == 'object') {
+                request.endpoint = $.extend({}, this.getInit().initialValue || this.config.initialValue);
             }
             return request
         },
@@ -161,7 +168,7 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
         handle: function(source, handler, callback){
             _log(this.getLog(), 'debug', ['[IntrospectiveApi]', '[ApiHandle]', '(handle)', source, handler]);
             this._current_args = arguments
-            var config = typeof(handler) == 'object' ? handler : undefined;
+            var config = typeof(handler) == 'object' && handler instanceof Object ? handler : undefined;
             handler = config === undefined ? handler : config.handler;
             
             // ApiObject: prepare specific Resource or simply object
@@ -169,8 +176,11 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             // url: fetch url and prepare result
             handler = handler || this.config.handler;
             
-            if (source == this.handler) {
-                return this.asClone(config);
+            if (source === this.handler) {
+                if (config ) {
+                    return this.asClone(config);
+                }
+                return this.handler
             }
             
             var chosen_handler, returned;
@@ -235,8 +245,9 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             if (default_handler) {
                 return default_handler
             }else{
-                console.log(source, default_handler);
-                throw Error('TODO: implement handlesApiHandle.parseSourceHandler()')
+                console.warn('TODO: implement handlesApiHandle.parseSourceHandler(). using OptionHandler', source, default_handler);
+                //throw Error('TODO: implement handlesApiHandle.parseSourceHandler()')
+                return OptionHandler
                 // TODO: callback(handler) is called after loading Handler
             }
         },
@@ -293,6 +304,10 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             
         },
         
+        resolveView: function(name){
+            return this.config.views && this.config.views[name] ? this.config.views[name] : name
+        },
+        
         getHandle: function(){
             return this.config.handle
         },
@@ -310,6 +325,13 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
                     return this
                 }
                 return this.asClone(config).handle(this.source)
+            }else if (this.getInit().initialValue && typeof(this.getInit().initialValue) == 'string'){
+                source = {uri: this.getInit().initialValue + '/'};
+                this.source = source;
+                this.setResource(this.getHost().provide(this.asRequest(source), {
+                    'return': 'Object'
+                }))
+                return this
             }
             throw Error('TODO: implement ApiHandler.handle() for ' + this.__proto__.constructor.name + '. ' + source)
             this.source = source;
@@ -340,6 +362,79 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             return this.source
         },
     };
+    
+      
+    
+    function OptionHandler(config) {
+        if (this.__init) {
+            // new ()
+            this.__init.apply(this, arguments)
+        }else{
+            //     ()
+            return [ListView, config]
+        }
+    }
+    
+    $.extend(OptionHandler.prototype, ApiHandle.prototype);
+    $.extend(OptionHandler.prototype, ApiHandlerPrototype, {
+        handle: function(source, handler){
+            _log(this.getLog(), 'debug', ['[IntrospectiveApi]', '[OptionHandler]', '(handle)', source, handler]);
+            var config = typeof(handler) == 'object' ? handler : undefined;
+            handler = config === undefined ? handler : config.handler;
+
+            if (this == source && config) {
+                return this.asClone(config).handle(this.source)
+            }
+            
+            if (Array.isArray(source)) {
+                throw Error('TODO: implement DetailHandler.handle for Arrays')
+            }else if (source && typeof source == 'object') {
+                if (source.__proto__ && source.__proto__.constructor != Object) {
+                    this.setResource(source.getResource())
+                }else if (source.uri || source.url){
+                    this.source = source;
+                    this.setResource(this.getHost().provide(this.asRequest(source), {
+                        'return': 'Object'
+                    }))
+                }else  if (this.getInit().initialValue && typeof(this.getInit().initialValue) == 'string' && source.pk && true){  // TODO: use a config setting to decide if its allowed
+                    this.source = source;
+                    source = $.extend({uri: this.getInit().initialValue + '/' + source.pk}, source)
+                    this.setResource(this.getHost().provide(this.asRequest(source), {
+                        'return': 'Object'
+                    }))
+                }else if (this.getInit().initialValue && source.pk){
+                    this.source = source;
+                    source = $.extend({uri: source.pk}, source)
+                    this.setResource(this.getHost().provide(this.asRequest(source), {
+                        'return': 'Object'
+                    }))
+                }else {
+                    console.log(source)
+                    throw Error('TODO: implement OptionHandler.handle for objects')
+                }
+            }else if (typeof source == 'string') {
+                this.source = source;
+                this.setResource(this.getHost().provide(this.asRequest(source), {
+                    'return': 'Object'
+                }))
+            }else{
+                ApiHandlerPrototype.handle.apply(this, arguments);
+                source = this.source;
+                //resource = this.options.source.get_resource()
+                //this._source = 
+            }
+            this.source = source;
+            this.getResource().discover(function(){
+                this.handle_refresh({
+                        source: this,
+                        view: this.resolveView('default'),
+                  });
+            }.bind(this))
+            return this
+            
+        },
+    })
+      
     
       
     
@@ -388,7 +483,7 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
                 var showEmptyList = true;
                 if (result.getList().length() || showEmptyList) {
                     this.handle_refresh({
-                            view: 'list',
+                            view: $this.resolveView('list'),
                             source: $this
                       });
                 }else{
@@ -396,13 +491,13 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
                     resource.bind('post-create', function(list, event, result){
                         list.add(result.get());
                         this.handle_refresh({
-                            view: 'list',
+                            view: this.resolveView('list'),
                             source: this
                         })
                     }.bind(this, result.getList()))
-                    
+                    // TODO: check if can POST. if setting: show create
                     this.handle_refresh({
-                            view: 'edit',
+                            view: this.resolveView('empty'),
                             source: resource  // TODO: new CreateHandler(this.getInit()?).handle(resource);
                     });
                 }
@@ -469,9 +564,15 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
                     this.setResource(this.getHost().provide(this.asRequest(source), {
                         'return': 'Resource'
                     }))
-                }else  if (this.getInit().initialValue && source.pk && true){  // TODO: use a config setting to decide if its allowed
+                }else  if (this.getInit().initialValue && typeof(this.getInit().initialValue) == 'string' && source.pk && true){  // TODO: use a config setting to decide if its allowed
                     this.source = source;
                     source = $.extend({uri: this.getInit().initialValue + '/' + source.pk}, source)
+                    this.setResource(this.getHost().provide(this.asRequest(source), {
+                        'return': 'Resource'
+                    }))
+                }else if (this.getInit().initialValue && source.pk){
+                    this.source = source;
+                    source = $.extend({uri: source.pk}, source)
                     this.setResource(this.getHost().provide(this.asRequest(source), {
                         'return': 'Resource'
                     }))
@@ -494,22 +595,23 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             this.getResource().load(function(result){
                 if (result.wasSuccessfull) {
                     $this.handle_refresh({
-                            view: 'detail',
+                            view: $this.resolveView('detail'),
                             source: $this
                     })
-                }else{
+                }else {
                     /*this.getHost().handle(new handles.CreateHandler(this.getInit()).handle(this.source), {
                         'return': 'Resource'
                     })*/
                     $this.getResource().bind('post-create', function(event, result){
                         $this.setResource(result.getResource());
                         $this.handle_refresh({
-                            view: 'detail',
+                            view: $this.resolveView('detail'),
                             source: $this
                         })
                     })
+                    // TODO: check if can POST. if setting: show create
                     this.handle_refresh({
-                            view: 'edit',
+                            view: $this.resolveView('not_found'),
                             source: $this
                     });
                 }
@@ -531,46 +633,74 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
     }
     
     $.extend(CreateHandler.prototype, ApiHandle.prototype, ApiHandlerPrototype, {
-        handle: function(source, config){
-            _log(this.getLog(), 'debug', ['[IntrospectiveApi]', '[CreateHandler]', '(handle)', source, config]);
+        handle: function(source, handler){
+            _log(this.getLog(), 'debug', ['[IntrospectiveApi]', '[CreateHandler]', '(handle)', source, handler]);
+            var $this = this;
+            var config = typeof(handler) == 'object' ? handler : undefined;
+            handler = config === undefined ? handler : config.handler;
+
+            if (this == source && config) {
+                return this.asClone(config).handle(this.source)
+            }
             
-            
+            var settings = {
+                callback: function(result){
+                    if (result.wasSuccessfull) {
+                        this.handle_refresh({
+                            view: this.resolveView('edit'),
+                            source: this
+                        });
+                    }else{
+                        throw Error('TODO: fail handler')
+                    }
+                    
+                }.bind(this)
+            };
             
             if (source === undefined || typeof(source) == 'string'){
-                
-                console.warn('create handler just mockup')
-                var settings = {
-                    done: function(){
-                        this.handle_refresh({
-                                view: 'edit',
-                                source: this
-                        });
-                    }.bind(this),
-                    fail: function(){throw Error('TODO: fail handler')}
-                };
-                settings['uri'] = source || '/';
-                this.source = settings['uri'];
+                console.warn('create handler for', source, 'is just mockup')
+                source = source || '/';
+                settings['uri'] = source;
                 this.applyState(settings);
-                source = this.getHost().provide(settings, {'return': 'Resource'});
-                this.getHost().discover(settings);
-            }
-
-            if (typeof(source) == 'object' && typeof(source.getResource) == 'function') {
-                this.source = source;
-                this.setResource(source.getResource())
-                this.getResource().bind('post-create', function(event, result){
-                    this.getBaseHandle().handle(result.getResource())
-                }.bind(this))
-                this.getResource().discover(function(){
+                var resource = this.getHost().provide(settings, {'return': 'Resource'});
+                this.setResource(resource)
+                
+            }else if (typeof(source) == 'object' && typeof(source.getResource) == 'function') {
+                var resource = source.getResource();
+                this.setResource(resource)
+                if (resource.isCreated()) {
+                    console.warn('create handler for created resources is just mockup')
+                    this.source = source;
                     this.handle_refresh({
-                            view: 'edit',
-                            source: this
+                        view: this.resolveView('detail'),
+                        source: this
                     });
-                }.bind(this));
-                return this
+                    return this
+                }
+            }else if (typeof(source) == 'object') {
+                console.warn('create handler for objects is just mockup')
+                this.asRequest(source);
+                source = this.getHost().provide(source, {'return': 'Resource'});
+                this.setResource(resource)
+            }else {
+                return ApiHandlerPrototype.handle.apply(this, arguments);
             }
+            this.source = source;
+            this.getResource().bind('post-create', function(event, result){
+                this.setResource(result.getResource());
+                // this.getBaseHandle().handle(result.getResource())
+                this.handle_refresh({
+                    view: this.resolveView('detail'),
+                    source: this
+                })
+            }.bind(this))
+
+            //this.getHost().discover(settings);
             
-            return ApiHandlerPrototype.handle.apply(this, arguments)
+            
+            this.getResource().discover(settings)
+
+            return this
         }
     })
     
@@ -601,7 +731,8 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
     $.extend(AutoHandle.prototype, ApiHandle.prototype, {
         handle: function(source, handler, callback){
             _log(this.getLog(), 'debug', ['[IntrospectiveApi]', '[AutoHandle]', '(handle)', source, handler]);
-            var config = typeof(handler) == 'object' ? handler : undefined;
+            var config = typeof(handler) == 'object' ? handler : undefined,
+                use_initial = false;
             handler = config === undefined ? handler : config.handler;
             var handle = this;
             if (source == this.handler && source !== undefined) {
@@ -609,12 +740,18 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             }
             
             if (source === undefined && this.init.initialValue) {
-                source = handle.init.initialValue ;
-            }else if (typeof(source) !== 'string' && this.handler && this.init.initialValue) {
+                if (typeof(this.init.initialValue) == 'string') {
+                    source = handle.init.initialValue;
+                }else{
+                    source = '/';
+                }
+            }else if (typeof(source) !== 'string' && this.handler) {
                 var id = this.handler.getResource().__getID(source);
-                source = handle.init.initialValue + (id ? id + '/' : '');
-            }else if (typeof(source) == 'object' && source.pk && this.init.initialValue) {
-                source = handle.init.initialValue + (source.pk ? source.pk + '/' : '');
+                use_initial = true;
+                source = (id ? id + '/' : '');
+            }else if (typeof(source) == 'object' && source.pk) {
+                use_initial = true;
+                source = (source.pk ? source.pk + '/' : '');
             //    console.log(resource);
             //    resource.discover();
             //}else if (typeof(source) !== 'string' && this.handler) {
@@ -623,26 +760,33 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
             //    resource.discover();
             }
             
+            
+            var settings = {
+                done: this.discoveredHandler.bind(this, source, callback),
+                fail: function(){
+                    throw Error('TODO: implement AutoHandler FailHandler')
+                },
+                //force: true  // TODO: result returning cached request doesnt contain needed jqXHR, does it?
+            }
+            
             if (typeof(source) == 'string'){
-                
-                console.warn('handler is missing a fail method')
-                var settings = {
-                    done: this.discoveredHandler.bind(this, source, callback),
-                    fail: function(){
-                        throw Error('TODO: implement AutoHandler FailHandler')
-                    },
-                    //force: true  // TODO: result returning cached request doesnt contain needed jqXHR, does it?
+                if (use_initial && this.init.initialValue && typeof(this.getInit().initialValue) == 'string') {
+                    source = handle.init.initialValue + source
                 }
+                console.warn('handler is missing a fail method')
                 settings['uri'] = source;
-                this.source = settings['uri'];
-                this.applyState(settings);
-                this.getHost().discover(settings);
+                
             }else if (!handler){
                 return ApiHandle.prototype.handle.apply(this, arguments)
             }
-            this.source = source; 
+            
+            this.source = source;
+            
             if (handler) {// TODO: use callback?
                 return this.executeHandler(undefined, handler).handle(source, this.getInit())
+            }else {
+                this.applyState(settings);
+                this.getHost().discover(settings);
             }
             
             return undefined
@@ -677,6 +821,7 @@ define(['jquery', "introspective-api-resources", 'introspective-api-log', 'json'
         AutoHandle: AutoHandle,
 
         CreateHandler: CreateHandler,
+        OptionHandler: OptionHandler,
         ListHandler: ListHandler,
         DetailHandler: DetailHandler,
     }

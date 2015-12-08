@@ -186,7 +186,8 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
             this.config = settings || {};
             this.initLanguage() ;
             this.initEndpoints(settings.initCallback);
-            this.name = this.config.name || this.host;
+            this.endpoint = this.config.endpoint;
+            this.name = this.config.name || this.endpoint;
             return this
         },
 
@@ -422,27 +423,33 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
                 var endpoint = this.getConnection('ajax').parseEndpoint(this.config.endpoint)
                 if (request.uri && request.uri.indexOf('://') != -1) {
                     request.url = request.uri;
-                    delete request.uri
+                    //delete request.uri
                 }
                 request.url = typeof(request.uri) == 'string' ? endpoint.endpoint + (request.uri[0] != '/' ? '/' : '') + request.uri : request.url;
                 if (request.uri && !this.config.endpoint) {
                     throw Error('not allowed: ' + request.uri)
                 }
-                delete request.uri;
+                //delete request.uri;
                 request.url = request.url.replace(/\/\//g, '/').replace(':/', '://')
                 
                 
                 var prefix = '://' + endpoint.host + endpoint.endpoint;
-                if (request.url.indexOf(prefix) == -1) {
+                if (request.url.toLowerCase().indexOf(prefix.toLowerCase()) == -1) {
                     if (request.url.indexOf('://') != -1) {
                         throw Error('not allowed: ' + request.url + ' on host: ' + prefix)
                     }
                     request.url = endpoint.host + request.url;
                 }; 
                 
+                // TODO: check only URL part before QUERY STRING - as :// can be unencoded in there?
                 if (request.url.indexOf('://') == -1) {
-                    request.url = this.getConnection('ajax').getProtocol(settings) + request.url;
+                    var connection = this.getConnection('ajax').getProtocol(settings);
+                    request.url = connection + request.url;
+                    request.base_url = connection + endpoint.host +  endpoint.endpoint + '/';
+                }else{
+                    request.base_url = request.url.split('://')[0] + '://' + endpoint.host +  endpoint.endpoint + '/';
                 }
+
                 if ((request.url.indexOf('?') != -1 ? request.url[request.url.indexOf('?')-1] : request.url[request.url.length -1]) != '/') {
                     index = request.url.indexOf('?') != -1 ? request.url.indexOf('?') : (request.url.length)
                     request.url = request.url.substr(0, index) + '/' + (request.url.length > index ? request.url.substr(index) : '');
@@ -459,9 +466,10 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
                     request.type = 'get';
                 }
                 
-                if (!request.source && this.getInteractor()) {
-                    request.source = this.getInteractor();
+                if (!settings.source && this.getInteractor()) {
+                    settings.source = this.getInteractor();
                 }
+                settings.isApiInternal = true;
             }
         },
         
@@ -639,6 +647,13 @@ define(["jquery", "introspective-api-client", "introspective-api-log"], function
     $.extend(IntrospectiveApiHost.prototype, {
         xhrHandlerMap: {
                 503:{
+                    'INCOMPLETE': {
+                        'obj': null,
+                        'callback': function(context){
+                            retryAfter = jqXHR.getResponseHeader('Retry-After');
+                            return context.methodMap.repeatRequest(retryAfter);
+                        }
+                    },
                     'MAINTENANCE':function(context){
                         context.apiClient.lock()
                         context.this.interact({

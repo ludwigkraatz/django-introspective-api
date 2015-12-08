@@ -1,4 +1,4 @@
-define(['jquery', 'introspective-api-resources', "introspective-api-log", "introspective-api-auth", 'json'], function ($, apiResources, _log, AuthProvider, JSON2) {
+define(['jquery', 'introspective-api-resources', "introspective-api-log", "introspective-api-auth", 'introspective-api-utils', 'json'], function ($, apiResources, _log, AuthProvider, apiUtils, JSON2) {
     var ApiObject = apiResources.Object,
         ApiResult = apiResources.Result;
     function ApiClientEvent() {
@@ -271,23 +271,27 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
         
         ajax_apiInternal: function( ajax, ajax_settings, id){
             process_data = true;
-            
             // signing the request if accessId available
-            if (typeof(ajax_settings.auth.isAuthenticated)=='function') {
+            if (ajax_settings.auth && typeof(ajax_settings.auth.isAuthenticated)=='function') {
                 var is_authenticated = ajax_settings.auth.isAuthenticated(ajax_settings.host);
                 if (is_authenticated) {
                     process_data = false;
                     ajax = ajax_settings.auth.sign('jQuery', {'request': ajax, 'settings': ajax_settings});
                 }else if (is_authenticated === undefined && ajax_settings.sendAuth !== true && this.requires_auth(ajax, ajax_settings)){
-                    auth_id = ajax_settings.auth.refresh();
+                    auth_id = ajax_settings.auth.refresh(ajax_settings.host, ajax_settings);
                     this.defereRequest(id, auth_id)
                     return undefined
                 }
-            }else if (ajax_settings.auth.accessId || ajax_settings.auth.profileId) {
+            }else if (ajax_settings.auth && (ajax_settings.auth.accessId || ajax_settings.auth.profileId)) {
                 ajax_settings.auth.validateResponse = true;
                 ajax = AuthProvider.sign_jQueryRequest(ajax, ajax_settings);
             }
-            if (process_data && ['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && ((ajax.dataType == 'json' || ajax.data instanceof Object) && (typeof(ajax.data) == 'object'  && ajax.data.__proto__.constructor))){
+            if ((!ajax.dataType || ajax.dataType == 'json') && !ajax.headers.Accept) {
+                $.extend(ajax.headers, {
+                    "Accept": 'application/json'
+                }); 
+            }
+            if (process_data && ['post', 'patch', 'put'].indexOf(ajax.type.toLowerCase()) != -1 && ((ajax.dataType == 'json' || ajax.data instanceof Object) && (typeof(ajax.data) == 'object'))){
                 ajax.data = JSON.stringify(ajax.data);
                 ajax.contentType = 'application/json; charset=utf-8';
                 delete ajax.dataType;
@@ -316,9 +320,11 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             if (this.debug_level > 0)
                 // TODO: don't log accessSecret
                 _log(ajax_settings.log || this.__log, 'debug', ['(info)', '[Introspective ApiClient]', 'request:', ajax, 'with settings', ajax_settings]);
+            
+            
             var jqxhr = this.ajax(ajax, id);
             
-            if (ajax_settings.auth.validateResponse) {
+            if (ajax_settings.auth && ajax_settings.auth.validateResponse) {
                 jqxhr.done(function(response, status, xhr){
                     if (ajax_settings.auth.ensure_validation) { // TODO: validate allways, not just on done()?
                         ajax_settings.auth.ensure_validation('jQuery', {'xhr': xhr, 'settings': ajax_settings})
@@ -420,6 +426,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             this.csrftoken = null;    
             
             this.debug_level = 1;
+            this.authentication_url = null;
         },
     
         init: function(settings){
@@ -532,6 +539,14 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             $.extend(settings,{'priority':0});
             return this.add(request, settings);      
         },
+        
+        get_id: function(request, settings){
+            if (request.id) {
+                return request.id
+            }
+            this.counter+=1;
+            return "counted_"+this.counter
+        },
     
         /*
          * specify an $.ajax(request), an id of this request for the queue and settings about what to do on adding an request with same id e.g.
@@ -540,9 +555,10 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
          *      priority:   from 0-max_priority
          */
         add: function (request, settings, id){
-            this.counter+=1;
+            var resolve_endpoint = false;
+
             if (id==undefined){
-                id= request.id || "counted_"+this.counter
+                id= this.get_id(request, settings)
             } 
             if (settings){
                 var priority=settings['priority']
@@ -627,6 +643,13 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 this.host.prepareRequest('jQuery', request, settings);
             }
             
+            if (request.endpoint) {
+                resolve_endpoint = typeof(request.endpoint) == 'object' ? request.endpoint : false;
+                if (!resolve_endpoint) {
+                    throw Error('not implemented')
+                }
+            }
+            
             if (settings.isApiInternal) {
                 var $this = this,
                     uri = true,
@@ -634,6 +657,8 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                         "global": false,
                         "headers": {},
                     };;
+                    
+                settings.host = this.host;
                 if (typeof(this.host) != 'string') {
                     // request was prepared by the host. so skip it now
                     uri = false;
@@ -652,6 +677,9 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 
                 $.extend(ajax.headers, this.default_headers);
                 $.extend(ajax, request);
+                if (settings.headers) {
+                    $.extend(ajax.headers, settings.headers);
+                }
                 $.extend(ajax.headers, this.additional_headers);
                 
                 
@@ -663,6 +691,8 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     
                     ajax.url = this.getProtocol(settings) + ajax.url;
                 }
+                ajax.base_url = request.base_url;
+                ajax.uri = request.uri;
                 request = ajax;
             }
             var result = new ApiResult({apiClient: this, url: request.url, raw: settings.raw, log: settings.log || this.__log});
@@ -691,6 +721,31 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 this.priotirized_requests[priority].push(id)
             }
             */
+            if (resolve_endpoint) {
+                this.resolve_url($.extend({}, resolve_endpoint, {callback: function(id, priority, superCallback, url){
+                        // TODO: get the host not from request.url
+                        this.queue[id].request.url = (this.queue[id].request.base_url || this.queue[id].request.url) + url + (this.queue[id].request.uri && this.queue[id].request.uri != '/' ? this.queue[id].request.uri : '');
+                        this._schedule(id, priority)
+                        if (superCallback) {
+                            superCallback(url)
+                        }
+                    }.bind(this, id, priority, resolve_endpoint.callback)
+                }))
+            }else{
+                this._schedule(id, priority)
+            }
+            
+            
+            return id;
+           },
+
+        _schedule: function(id, priority){
+            var request = this.queue[id].request,
+                settings = this.queue[id].settings;
+            if (priority === undefined) {
+                priority = 0
+            }
+
             if (((this.active<this.at_once && priority == 0)
                 || !this.priotirized
             ) && !this.is_locked(request, settings)) {
@@ -707,9 +762,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     setTimeout(function (){$this.next()}, 10);
                 }
             }
-            
-            return id;
-           },
+        },
     
         /*
          * start next highest request
@@ -778,6 +831,8 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
     
             this.active+=1;
     
+            this.queue[id]["settings"]['ts'] = this.getTimestamp(this.queue[id]["settings"].host);
+
             var request =   $.extend({}, this.queue[id]["request"]),
                 settings =  $.extend({}, this.queue[id]["settings"]);
             var $ajax;
@@ -864,7 +919,6 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
          */
         _complete: function(id){
             var $this=this;
-                $this.active-=1,
                 entry = $this.queue[id],
                 cache = this.getCache();
                 
@@ -1016,6 +1070,7 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             methodMap.proceedSuccess = apiClient._getSuccessCallbackHandler(id, methodMap);
 
             methodMap.processInteraction = function (result){
+                // TODO this is not just a method for 401 interactions. make this more appropriate..
                 if (result) {
                     apiClient.unlock(apiClient.queue[id].request, apiClient.queue[id].settings, result);
                     $.each(apiClient.deferredQueue, function(index, id){
@@ -1031,6 +1086,9 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
             };
                 
             methodMap.repeatRequest = function (retryAfter) {
+                if (!retryAfter) {
+                    return apiClient.start(id);
+                }
                 setTimeout(apiClient.start, parseInt(retryAfter)*1000, id);
             };
                 
@@ -1054,9 +1112,10 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     code = error_jqXHR;
                 }
                 
+                apiClient.active-=1;
+                
                 var status = jqXHR.status;
                 result.registerXhr(jqXHR);
-
                 var context ={
                     result: result,
                     request: request,
@@ -1125,6 +1184,66 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                 this.accessAlgorithm = response.accessAlgorithm;
                 
         },
+        
+        resolve_url: function(settings){
+            var target = settings.target,
+                type = settings.type,
+                callback = settings.callback;
+
+            return this.getApiOptions(function(result){
+                    var links = result.getHeaderLinks(),
+                        url_done = false,
+                        url;
+                    if (links[target]) {  // TODO: check type
+                        url = links[target];
+                        url_done = true;
+                    }else if (links[type]) {  // TODO: ... not right this way
+                        //throw Error()
+                        url = links[type]
+                    }
+                    if (!url_done){
+                        var sitemap = this.getSitemap(),
+                            uri;
+                        if (url) {
+                            uri = url.replace(sitemap['.'], '')
+                        }console.log(url, sitemap)
+                        if (sitemap[target]) {
+                            url = sitemap[target]['.'];
+                            url_done = true;
+                        }else if (sitemap[type] || (uri && sitemap[uri])) {
+                            type_sitemap = sitemap[type] || (uri && sitemap[uri])
+                            if (type_sitemap[target]) {
+                                url = type_sitemap[target]['.'];
+                                url_done = true;
+                            }else{
+                                this.add_urgent({
+                                        uri: type_sitemap['.'],
+                                        type: 'OPTIONS',
+                                        ignoreLock: settings.ignoreLock,
+                                        raw: true,
+                                        isApiInternal: true,
+                                        done: function(result){
+                                            var links = result.getHeaderLinks();
+                                            if (links[target]) {
+                                                callback(links[target])
+                                            }else{
+                                                throw Error('couldnt find "'+target+'" url');
+                                            }
+                                        }.bind(this),
+                                        fail: function(){
+                                            throw Error('couldnt find "'+target+'" url');
+                                        }
+                                    })
+                                return false;
+                            }
+                        }
+                    }
+                    if (!url_done) {
+                        throw Error('couldnt find "'+target+'" url');
+                    }
+                    callback(url)
+                }.bind(this))
+        },
         authentication_url: null,
         getAuthenticationURL: function(callback){
             if (!this.authentication_url) {
@@ -1132,45 +1251,16 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     throw Error('no authentication url known. provide callback, so that discovering can be done')
                 }
 
-                return this.getApiOptions(function(result){
-                    var links = result.getHeaderLinks(),
-                        auth_url = '';
-                    if (links['login']) {
-                        this.authentication_url = links['login'];
-                    }
-                    var sitemap = this.getSitemap();
-                    if (sitemap['login']) {
-                        this.authentication_url = sitemap['login']['.'];
-                    }else if (sitemap['auth']) {
-                        if (sitemap['auth']['login']) {
-                            this.authentication_url = sitemap['auth']['login']['.'];
-                        }else{
-                            this.add_urgent({
-                                    uri: sitemap['auth']['.'],
-                                    type: 'OPTIONS',
-                                    ignoreLock: true,
-                                    raw: true,
-                                    isApiInternal: true,
-                                    done: function(result){
-                                        var links = result.getHeaderLinks();
-                                        if (links['login']) {
-                                            this.authentication_url = links['login'];
-                                            callback(this.authentication_url)
-                                        }else{
-                                            throw Error('couldnt find login url');
-                                        }
-                                    }.bind(this),
-                                    fail: function(){
-                                        throw Error('couldnt find login url');
-                                    }
-                                })
-                            return false;
-                        }
-                    }else{
-                        throw Error('couldnt find login url');
-                    }
-                    callback(this.authentication_url)
-                }.bind(this))
+                this.resolve_url({
+                    'target': 'login',
+                    'type': 'auth',
+                    'callback': function(url){
+                        this.authentication_url = url;
+                        callback(url)
+                    }.bind(this),
+                    ignoreLock: true
+                })
+                return false
             }
             if (callback) {
                 callback(this.authentication_url)
@@ -1185,45 +1275,15 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
                     throw Error('no logout url known. provide callback, so that discovering can be done')
                 }
 
-                return this.getApiOptions(function(result){
-                    var links = result.getHeaderLinks(),
-                        auth_url = '';
-                    if (links['logout']) {
-                        this.logout_url = links['logout'];
-                    }
-                    var sitemap = this.getSitemap();
-                    if (sitemap['logout']) {
-                        this.logout_url = sitemap['logout']['.'];
-                    }else if (sitemap['auth']) {
-                        if (sitemap['auth']['logout']) {
-                            this.logout_url = sitemap['auth']['logout']['.'];
-                        }else{
-                            this.add_urgent({
-                                    uri: sitemap['auth']['.'],
-                                    type: 'OPTIONS',
-                                    ignoreLock: true,
-                                    raw: true,
-                                    isApiInternal: true,
-                                    done: function(result){
-                                        var links = result.getHeaderLinks();
-                                        if (links['logout']) {
-                                            this.logout_url = links['logout'];
-                                            callback(this.logout_url)
-                                        }else{
-                                            throw Error('couldnt find login url');
-                                        }
-                                    }.bind(this),
-                                    fail: function(){
-                                        throw Error('couldnt find login url');
-                                    }
-                                })
-                            return false;
-                        }
-                    }else{
-                        throw Error('couldnt find login url');
-                    }
-                    callback(this.authentication_url)
-                }.bind(this))
+                return this.resolve_url({
+                    'target': 'logout',
+                    'type': 'auth',
+                    'callback': function(url){
+                        this.logout_url = url;
+                        callback(url)
+                    }.bind(this),
+                    ignoreLock: true
+                })
             }
             if (callback) {
                 callback(this.logout_url)
@@ -1233,17 +1293,18 @@ define(['jquery', 'introspective-api-resources', "introspective-api-log", "intro
         },
         
         refreshCredentials: function(settings){
+            var request;
+            if (settings.auth && settings.auth.provider) {
+                request = settings.auth.provider.generatejQueryAuthRequest(settings)
+            }else{
+                request = AuthProvider.generatejQueryAuthRequest(settings)
+            }
+            var id = settings.id || this.get_id(request, settings)
             //if (client.endpoint == null) {
             //    _log(settings.log, 'error', ['refreshing credentials needs the endpoint to be set']);
             //    throw Error("Refreshing Credentials needs the endpoint to be set")
             //}
             this.getAuthenticationURL(function(url){
-                var request;
-                if (settings.auth && settings.auth.provider) {
-                    request = settings.auth.provider.generatejQueryAuthRequest(settings)
-                }else{
-                    request = AuthProvider.generatejQueryAuthRequest(settings)
-                }
                 request.url = url;
                 // TODO: this.updateCSRFToken(result)
                 var id = this.add_urgent(request, settings, id);

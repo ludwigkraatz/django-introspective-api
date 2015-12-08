@@ -82,6 +82,13 @@ define(['jquery', 'introspective-api-resources', 'introspective-api-log', 'json'
         __init: function(){
             
         },
+        handle: function(subject, config){
+            return null
+        },
+
+        provide: function(subject, config){
+            return null
+        },
         
         process: function(){
             // do nothing
