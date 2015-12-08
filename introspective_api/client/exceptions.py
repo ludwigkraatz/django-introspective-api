@@ -1,5 +1,7 @@
+from ..exceptions import IntrospectiveApiException
 
-class InstrospectiveApiException(Exception):
+
+class IntrospectiveApiClientException(IntrospectiveApiException):
     _traceback = None
     
     def __init__(self, introspective_api_object=None, attr=None, *args, **kwargs):
@@ -9,7 +11,7 @@ class InstrospectiveApiException(Exception):
         if isinstance(self._attr, BaseException):
             import traceback
             self._traceback = traceback.format_exc()
-        super(InstrospectiveApiException, self).__init__(*args, **kwargs)
+        super(IntrospectiveApiClientException, self).__init__(*args, **kwargs)
         
     def as_html(self, ):
         return self.get_request() + "<br />" + self.get_response() + "<br />" + self.get_additional()

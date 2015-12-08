@@ -3,8 +3,8 @@ from introspective_api.settings import api_settings
 from django.contrib.auth.models import AnonymousUser
 from django.utils.functional import SimpleLazyObject
 from django.contrib.auth import get_user_model
-from introspective_api.client import InstrospectiveApiException
-from introspective_api.exceptions import ApiKeyNeedsRevalidation, InvalidKey
+from introspective_api.client import IntrospectiveApiClientException
+from introspective_api.exceptions import ApiKeyNeedsRevalidation, InvalidKey, InteractionException
 import json
 from introspective_api import get_access_key_model, get_consumer_model
 from django.core.urlresolvers import reverse
@@ -49,7 +49,7 @@ def get_ClientException_Response(request, exception):
 
 class API_Client_Middleware(object): 
     def process_exception(self, request, exception):
-        if isinstance(exception, InstrospectiveApiException):
+        if isinstance(exception, IntrospectiveApiClientException):
             return get_ClientException_Response(request, exception)
         return None    
 

@@ -17,7 +17,7 @@ dthandler = lambda obj: obj.isoformat() if isinstance(obj, datetime.datetime) el
 ##
 
 class IntrospectiveApiResult(object):
-    _exception_class = InstrospectiveApiException
+    _exception_class = IntrospectiveApiClientException
     
     def __init__(self, client, body=None, header=None, url=None):
         self._client = client
@@ -149,7 +149,7 @@ class IntrospectiveApiResult(object):
     
 
 class IntrospectiveApiClient(object):
-    _exception_class = InstrospectiveApiException
+    _exception_class = IntrospectiveApiClientException
     
     _default_result_class = IntrospectiveApiResult
     _use_hawk_default = False
