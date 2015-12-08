@@ -149,47 +149,76 @@ class ApiEndpointMixin(object):
             return self._endpoints[name][0]
         raise EndpointNotFound('Endpoint "%s" not found' % name)
 
-    def register_resource(self, name, model, **config):
+    def register_resource(self, name, model, allow_lazy=False, **config):
         get_detail_view = lambda endpoint: endpoint._endpoints.values()[0][0] if getattr(endpoint, '_shadow', False) else endpoint
         if getattr(self, '_shadow', False):
             return get_detail_view(self).register_resource(name, model, **config)
         config['model'] = model
-        serializer_model = config.get('serializer_model', model)
-        view_name = config.pop('view_name', model.__class__.__name__)
+
+        serializer_model = config.get('serializer_model', None)
+        if serializer_model is None:
+            if hasattr(model, '_meta') and hasattr(model._meta, 'serializer_model'):
+                serializer_model = getattr(model._meta, 'serializer_model')
+            else:
+                serializer_model = model
+        config['serializer_model'] = serializer_model
+
+        endpoint_class = config.get('endpoint_class', None)
+        if endpoint_class is None:
+            if hasattr(model, '_meta') and hasattr(model._meta, 'endpoint_class'):
+                endpoint_class = getattr(model._meta, 'endpoint_class')
+            else:
+                endpoint_class = None
+        if endpoint_class:
+            config['endpoint_class'] = endpoint_class
+
+        if hasattr(model, '_meta') and hasattr(model._meta, 'endpoint_config'):
+            config.update(getattr(model._meta, 'endpoint_config'))
+
+        view_name = config.pop('view_name', model.__module__ + '__' + model.__name__)
 
         endpoints = {}
-        config['view_config'] = {
-            'base_view': config.get('list_view', ListCreateAPIView),
-            'model': model
-        }
-        config['view_name'] = 'ResourceEndpoint-' + view_name + '-list'
-        endpoints['list'] = self.register_endpoint(name, **config)
-        setattr(endpoints['list'], '_shadow', True)
+        if allow_lazy and hasattr(model, '_meta') and hasattr(model._meta, 'list_endpoint'):
+            endpoints['list'] = model._meta.list_endpoint
+            self.register_redirect(name, endpoints['list'], permanent_redirect=False, view_name=view_name, **config)
+        else:
+            config['view_config'] = {
+                'base_view': config.get('list_view', ListCreateAPIView),
+                'model': model
+            }
+            config['view_name'] = 'ResourceEndpoint-' + view_name + '-list'
+            endpoints['list'] = self.register_endpoint(name, **config)
+            setattr(endpoints['list'], '_shadow', True)
+
         if self.parent and self.parent.links:
             self.parent.links[name] = endpoints['list']
 
-        if 'target' in config:
-            target_name, target_endpoint = config['target']
-            target_endpoint = get_detail_view(target_endpoint)
-
-            self.links[target_name] = target_endpoint
-            if self.parent and self.parent.links:
-                self.parent.links[target_name] = target_endpoint
-
-            # TODO:? register redirect for sitemap
-            #endpoints['detail'] = endpoints['list'].register_redirect(target_name, target_endpoint)
+        if allow_lazy and hasattr(model, '_meta') and hasattr(model._meta, 'detail_endpoint'):
+            endpoints['detail'] = model._meta.detail_endpoint
         else:
-            config['view_config'] = {
-                'base_view': config.get('detail_view', RetrieveUpdateDestroyAPIView),
-                'model': model
-            }
-            config['view_name'] = 'ResourceEndpoint-' + view_name + '-detail'
-            selector = config.get('detail_selector', model._meta.pk.name)
-            selector_expr = config.get('detail_selector_expr', '[a-zA-Z0-9\-$_.+!*\'(),]*')
-            endpoints['detail'] = endpoints['list'].register_selector(selector, selector_expr, **config)
+            if 'target' in config:
+                target_name, target_endpoint = config['target']
+                target_endpoint = get_detail_view(target_endpoint)
+    
+                self.links[target_name] = target_endpoint
+                if self.parent and self.parent.links:
+                    self.parent.links[target_name] = target_endpoint
+    
+                endpoints['detail'] = target_endpoint
+                # TODO:? register redirect for sitemap
+                #endpoints['detail'] = endpoints['list'].register_redirect(target_name, target_endpoint)
+            else:
+                config['view_config'] = {
+                    'base_view': config.get('detail_view', RetrieveUpdateDestroyAPIView),
+                    'model': model
+                }
+                config['view_name'] = 'ResourceEndpoint-' + view_name + '-detail'
+                selector = config.get('detail_selector', model._meta.pk.name)
+                selector_expr = config.get('detail_selector_expr', '[a-zA-Z0-9\-$_.+!*\'(),]*')
+                endpoints['detail'] = endpoints['list'].register_selector(selector, selector_expr, **config)
 
-            if endpoints['detail'].model and not hasattr(endpoints['detail'].model, '_api_endpoint_detail'):
-                endpoints['detail'].model._api_endpoint_detail = endpoints['detail']
+        if endpoints['detail'].model and not hasattr(endpoints['detail'].model, '_api_endpoint_detail'):
+            endpoints['detail'].model._api_endpoint_detail = endpoints['detail']
 
         if 'link' in config:# and False:
             link_name, link_endpoint = config['link']
@@ -211,8 +240,18 @@ class ApiEndpointMixin(object):
         #            raise ImproperlyConfigured, 'view argument missing'
         #        return getattr(self, 'register_endpoint')(name, view=view, **kwargs)
         #    return dec
+        link = config.pop('link_as', None)
 
-        return self._register_endpoint(name, **config)
+        endpoint = self._register_endpoint(name, **config)
+        
+        if link:
+            link_name, link_endpoint = link, endpoint
+            self.links[link_name] = link_endpoint
+            #raise Exception(self.links, link, endpoint.as_url())
+            #if self.parent and self.parent.links:
+            #    self.parent.links[link_name] = link_endpoint
+
+        return endpoint
 
     def register_selector(self, name, pattern, **config):
         """
