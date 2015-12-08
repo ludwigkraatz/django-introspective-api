@@ -8,10 +8,7 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
         if (url.indexOf('{') != -1){
             var id_attrs = [];
             if (resource) {
-                if ((!data || $.isEmptyObject(data))) {
-                    data = {};
-                    $.extend(data, resource.__syncedContent, resource.__data);
-                }
+                data = $.extend({}, resource.__syncedContent.json, resource.__data, data);
                 
                 id_attrs = resource.__info.id_attrs;
             }
@@ -37,8 +34,9 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
     }
     utils.unpackURL = unpackURL;
     function parseLinkHeader(link_header) {
-            link_header_expr = /<([a-z:/\-0-9\.?&_=]*)>; rel="([a-zA-Z0-9:/\-?= ]*)"(?:; title="([a-zA-Z0-9:/\-_?= ]*)",?)*/g
-            links = {}
+            var link_header_expr = /<([a-z:/\-0-9\.!$?&_=]*)>; rel="([a-zA-Z0-9:/\-?= ]*)"(?:; title="([a-zA-Z0-9:/\-_?= ]*)",?)*/g,
+                links = {},
+                name;
             while (link = link_header_expr.exec(link_header)){
                 name = link[3] ? link[3] : link[2];
                 links[name] = link[1];
@@ -47,8 +45,9 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
     };
     utils.parseLinkHeader = parseLinkHeader;
     function parseLinkTemplateHeader(header) {
-        templatelink_header_expr = /<([a-z:{}/\-0-9\.?&_=]*)>; rel="([a-zA-Z0-9:/\-?= ]*)"(?:; title="([a-zA-Z0-9:/\-_?= ]*)",?)*/g
-        links = {}
+        var templatelink_header_expr = /<([a-z:{}/\-0-9\.!$?&_=]*)>; rel="([a-zA-Z0-9:/\-?= ]*)"(?:; title="([a-zA-Z0-9:/\-_?= ]*)",?)*/g,
+            links = {},
+            name;
         while (link = templatelink_header_expr.exec(header)){
             name = link[3] ? link[3] : link[2];
             links[name] = link[1];
@@ -69,8 +68,16 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
     }
     utils.ApiObjectEvent = ApiObjectEvent;
     $.extend(ApiObjectEvent.prototype, {
-        init: function(name){
+        init: function(name, settings){
             this.name = name;
+            if (settings) {
+                $.each(settings, function(name, value){
+                    if (!this[name]) {
+                        this[name] = value;
+                    }
+                }.bind(this))
+            }
+            
         }
     })
     
@@ -92,7 +99,7 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
             this.ajaxID= null;
             this.response = undefined;
             this.responseText = undefined;
-            this.action = settings.action;
+            this.action = settings.action || 'nothing';
             this.jqXHR = undefined;
 
             delete settings.action;
@@ -113,7 +120,7 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
         },
         
         registerSettings: function(settings){
-            $.extend(this.settings, settings);
+            this.settings = settings;
         },
         
         registerResult: function(result){            
@@ -132,6 +139,11 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
         },
         
         registerFailure: function(jqXHR, status, error){
+            if (typeof(jqXHR) != 'object') {
+                var _error = jqXHR;
+                jqXHR = error;
+                error = _error;
+            }
             this.responseText = jqXHR.responseText;
             this.jqXHR = jqXHR;
             this.setStatus('failed', error, false);
@@ -195,7 +207,17 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
                         return val
                     }
                 }
-                return this.response || ((format === undefined || format == 'json') && typeof(this.responseText) == 'string' && this.responseText ? JSON.parse(this.responseText) : this.responseText)
+                if (this.response) {
+                    return this.response
+                }
+                if ((format === undefined || format == 'json') && typeof(this.responseText) == 'string' && this.responseText){
+                    try {
+                        return JSON.parse(this.responseText)
+                    }catch (Error){
+                        return {msg: 'error parsing response as JSON', content: this.responseText}  // TODO
+                    }
+                }
+                return this.responseText
             }else{
                 var obj = this.getResource()
                 return obj.__onLoad(format);                
@@ -247,8 +269,8 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
             return resources[name]
         },
         
-        getNew: function(name){
-            return new (this._getResourceType(name))(this.getNewConfig(name));
+        getNew: function(name, config){
+            return new (this._getResourceType(name))($.extend({}, this.getNewConfig(name), config));
         },
         
         getNewConfig: function(name){
@@ -406,8 +428,8 @@ define(['jquery', 'json', 'introspective-api-log', ], function($, JSON, _log){
             this._events = events;
         },
         
-        __trigger: function (event_name, args) {
-            var event = new utils.ApiObjectEvent(event_name);
+        __trigger: function (event_name, args, event_settings) {
+            var event = new utils.ApiObjectEvent(event_name, event_settings);
             var event_args = new Array();
 
             event_args.push(event);
