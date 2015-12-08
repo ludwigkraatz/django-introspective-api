@@ -3,6 +3,7 @@ from django.views.generic import RedirectView
 from rest_framework import status
 from introspective_api.settings import api_settings
 from introspective_api.fields import HyperlinkedMetaField, HyperlinkedIdentityField
+from introspective_api.fields import NoReverseMatch, ResolveError
 from django.core.exceptions import ValidationError
 from functools import update_wrapper
 from django.views.decorators.csrf import csrf_exempt
@@ -179,12 +180,16 @@ class APIView(APIView):
                 for name, field in (serializer or serializer_class()).get_meta_fields().iteritems():
                     link_name = self.get_header_link_name_from_field(field, name)
                     try:
-                        uri = field.field_to_native(serializer.object if serializer else None, name)
+                        obj = (serializer.object if serializer else None) or object
+                        if obj is None:
+                            raise ResolveError()
+
+                        uri = field.field_to_native(obj, name)
                         self.add_link_header(headers,
                                                   name=link_name,
                                                   uri=uri
                                                   )
-                    except:
+                    except ResolveError:  # , NoReverseMatch:
                         uri = serializer.field_to_template(field, name)#, include_pattern=False)
                         self.add_link_template_header(headers,
                                                   name=link_name,
@@ -271,8 +276,8 @@ class APIView(APIView):
         We may as well implement this as Django will otherwise provide
         a less useful default implementation.
         """
-        headers = self.get_response_headers(request)#,object=instance|list)
-        return ApiResponse(self.metadata(request), status=status.HTTP_200_OK, headers=headers).finalize_for(request)
+        headers = self.get_response_headers(request=request)#,object=instance|list)
+        return ApiResponse(self.metadata(request=request), status=status.HTTP_200_OK, headers=headers).finalize_for(request)
 
 class EndpointView(APIView):
 

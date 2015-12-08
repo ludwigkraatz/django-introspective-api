@@ -169,7 +169,8 @@ class HyperlinkedMetaField(Field):
                                              querystrings=querystring_dict,
                                              defaults=defaults,
                                              opt_querystrings=opt_querystrings)
-                break
+                if val is not None:
+                    break
         if val is None:
             raise ResolveError("'%s' could not be resolved" % field_name)
         
@@ -415,7 +416,6 @@ class HyperlinkedRelatedView(HyperlinkedMetaField):
             try:
                 return reverse(self.view_name, kwargs=kwargs, request=request, format=format)
             except NoReverseMatch:
-                raise
                 pass
             
 

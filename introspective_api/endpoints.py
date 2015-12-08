@@ -268,7 +268,6 @@ class ApiEndpointMixin(object):
                 if redirect_lookup:
                     origin_view = self.view_class.as_view(dispatch=False)
 
-
                 urlpatterns.append(
                     url(
                         endpoint_url,
@@ -653,7 +652,7 @@ class ApiEndpoint(ApiEndpointMixin):
             #url = self.target_endpoint.as_sitemap_url(absolute=True)
             url = '%s' % (with_name or self.name)
         else:
-            raise Exception, 'not implemented'
+            raise NotImplementedError()
 
         if absolute:
             parent_url = (self.parent.as_sitemap_url(absolute=True) + '/') if self.parent else ''
@@ -780,7 +779,7 @@ class APIRoot(ApiEndpointMixin, APIView):
         return 'api'
 
     def options(self, request, *args, **kwargs):
-        version = request.GET.get('version', '1.0')
+        version = request.GET.get('version', '1.0')  # TODO latest
 
         ret = super(APIRoot, self).options(request, *args, **kwargs)
         ret = ret.data

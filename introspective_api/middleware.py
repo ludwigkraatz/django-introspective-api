@@ -41,11 +41,13 @@ def get_HawkMissing_Response(request, code='AUTHENTICATION MISSING'):
         ret['Location'] = request.build_absolute_uri(reverse('api:profile-auth')) + '?action=authenticate'  # TODO: own login view
         return ret
 
+
 def get_ClientException_Response(request, exception):    
     return ApiResponse(
         {"msg": "Internal Server Communication Error", "detail": str(exception.as_html())},
         code="error",
         status=500).finalize_for(request)
+
 
 class API_Client_Middleware(object): 
     def process_exception(self, request, exception):
@@ -188,3 +190,5 @@ class HAWK_Authentication(object):
         if isinstance(exception, InvalidKey):
             return get_InvalidKeyException_Response(request, exception)
         return None
+
+

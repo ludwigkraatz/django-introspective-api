@@ -230,11 +230,14 @@ class GenericAPIView(ActionView):
     def get_actions(self, request, *args, **kwargs):
         actions = None
         if self.model and hasattr(self.model, 'get_api_actions'):
-            try:
-                instance = self.get_object()
-            except:
-                instance = None
-            actions = self.model.get_api_actions(request=request, instance=instance, *args, **kwargs)
+            instance = kwargs.pop('instance', None)
+            if instance is None:
+                try:
+                    instance = self.get_object()
+                except:
+                    pass
+
+            actions = self.model.get_api_actions(request=request, instance=instance, view=self, *args, **kwargs)
         return actions or super(GenericAPIView, self).get_actions(request, *args, **kwargs)
 
     def get_serializer_context(self):

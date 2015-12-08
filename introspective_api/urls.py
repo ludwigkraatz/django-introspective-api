@@ -1,12 +1,10 @@
 from django.conf.urls import patterns, include, url
+from .endpoints import api_root
 
 
 from django.conf import settings
 from django.utils import importlib
 
-
-from .endpoints import api_root
-from .settings import api_settings
 
 for app in settings.INSTALLED_APPS:
     if app.endswith('.api') or app == 'api':
